@@ -1,7 +1,13 @@
 [package]
 name = "pahe-cli"
-version = "0.0.1-alpha"
-edition = "2024"
+description = "pahe's cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 clap.workspace = true

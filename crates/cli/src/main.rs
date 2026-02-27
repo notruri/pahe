@@ -3,7 +3,7 @@ use std::{path::PathBuf, str::FromStr};
 use clap::{Args, Parser, Subcommand};
 use inquire::{Select, Text};
 use owo_colors::OwoColorize;
-use pahe::{EpisodeVariant, PaheBuilder, PaheError};
+use pahe::prelude::*;
 use pahe_downloader::{DownloadConfig, download, suggest_filename};
 
 #[derive(Debug, Parser)]
@@ -111,7 +111,7 @@ struct CliLogger {
 }
 
 impl CliLogger {
-    fn new(level: &str) -> pahe::Result<Self> {
+    fn new(level: &str) -> Result<Self> {
         let level = LogLevel::parse(level).ok_or(PaheError::Message(format!(
             "invalid log level: {level}. expected one of: error, warn, info, debug"
         )))?;
@@ -154,7 +154,7 @@ struct EpisodeRange {
 impl FromStr for EpisodeRange {
     type Err = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if let Some((start, end)) = s.split_once('-') {
             let start: i32 = start.parse().map_err(|_| "invalid start")?;
             let end: i32 = end.parse().map_err(|_| "invalid end")?;
@@ -185,7 +185,7 @@ impl std::fmt::Display for EpisodeRange {
 }
 
 #[tokio::main]
-async fn main() -> pahe::Result<()> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -195,7 +195,7 @@ async fn main() -> pahe::Result<()> {
     }
 }
 
-async fn run_resolve(args: ResolveArgs) -> pahe::Result<()> {
+async fn run_resolve(args: ResolveArgs) -> Result<()> {
     let logger = CliLogger::new(&args.log_level)?;
     let resolves = resolve_episode_urls(args, &logger).await?;
 
@@ -210,7 +210,7 @@ async fn run_resolve(args: ResolveArgs) -> pahe::Result<()> {
     Ok(())
 }
 
-async fn run_download(args: DownloadArgs) -> pahe::Result<()> {
+async fn run_download(args: DownloadArgs) -> Result<()> {
     let logger = CliLogger::new(&args.resolve.log_level)?;
 
     let urls = match args.url {
@@ -257,7 +257,7 @@ async fn run_download(args: DownloadArgs) -> pahe::Result<()> {
     Ok(())
 }
 
-async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> pahe::Result<Vec<String>> {
+async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<Vec<String>> {
     let runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
         prompt_for_args(args)?
     } else {
@@ -313,7 +313,7 @@ async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> pahe::Re
     Ok(results)
 }
 
-fn prompt_for_args(args: ResolveArgs) -> pahe::Result<RuntimeArgs> {
+fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
     let series_default = args.series.unwrap_or_default();
     let cookies_default = args.cookies.unwrap_or_default();
 
@@ -381,7 +381,7 @@ fn select_quality(
     quality: &str,
     audio_lang: &str,
     logger: &CliLogger,
-) -> pahe::Result<EpisodeVariant> {
+) -> Result<EpisodeVariant> {
     let filtered: Vec<EpisodeVariant> = variants
         .iter()
         .filter(|variant| match audio_lang {

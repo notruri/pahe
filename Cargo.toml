@@ -1,10 +1,16 @@
 [package]
 name = "pahe"
-version = "0.0.1-alpha"
-edition = "2024"
+description = "A small library for AnimePahe and Kwik"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-pahe-core = { path = "crates/core", version = "0" }
+pahe-core.workspace = true
 anyhow.workspace = true
 regex.workspace = true
 reqwest.workspace = true
@@ -12,6 +18,7 @@ scraper.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 
 [workspace]
 members = [
@@ -20,8 +27,18 @@ members = [
     "crates/downloader",
 ]
 
+[workspace.package]
+version = "0.1.0-alpha"
+edition = "2024"
+authors = ["Ruri <ruriyoshinova@proton.me>"]
+license = "AGPL-3.0"
+repository = "https://git.ruri.one/ruri/pahe-rs"
+keywords = ["pahe"]
+categories = []
+
 [workspace.dependencies]
 pahe = { path = "." }
+pahe-core = { path = "crates/core" }
 pahe-downloader = { path = "crates/downloader" }
 crossterm = "0.29"
 clap = { version = "4", features = ["derive", "env"] }

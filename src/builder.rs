@@ -1,4 +1,4 @@
-use crate::{PaheClient, Result};
+use crate::prelude::*;
 
 pub struct PaheBuilder {
     cookies: Option<String>,
