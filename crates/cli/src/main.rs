@@ -247,7 +247,7 @@ async fn resolve_episode_url(args: ResolveArgs, logger: &CliLogger) -> pahe::Res
 
     let variants = pahe.fetch_episode_variants(play_link).await?;
     let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
-    let quality = format!("{}", selected.resolution);
+    let quality = format!("{}p", selected.resolution);
 
     logger.info(format!("language: {}", selected.lang.yellow()));
     logger.info(format!("quality: {}", quality.yellow()));
