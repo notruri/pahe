@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use pahe_core::KwikError;
+
 pub type Result<T> = std::result::Result<T, PaheError>;
 
 #[derive(Debug, Error)]
@@ -10,8 +12,8 @@ pub enum PaheError {
     #[error("failed building reqwest client: {0}")]
     BuildClient(#[source] reqwest::Error),
 
-    #[error("failed building kwik client: {0}")]
-    BuildKwikClient(#[source] anyhow::Error),
+    #[error("kwik error: {0}")]
+    Kwik(#[from] KwikError),
 
     #[error("invalid anime link; unable to parse anime id from {link}")]
     InvalidAnimeLink { link: String },

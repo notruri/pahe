@@ -86,7 +86,7 @@ impl PaheClient {
 
         Ok(Self {
             client,
-            kwik: KwikClient::new().map_err(PaheError::BuildKwikClient)?,
+            kwik: KwikClient::new()?,
             cookie_header,
         })
     }
@@ -382,9 +382,6 @@ impl PaheClient {
 
     /// resolves a `pahe.win` variant into a final downloadable direct link.
     pub async fn resolve_direct_link(&self, variant: &EpisodeVariant) -> Result<DirectLink> {
-        self.kwik
-            .extract_kwik_link(&variant.dpahe_link)
-            .await
-            .map_err(PaheError::ResolveDirectLink)
+        Ok(self.kwik.extract_kwik_link(&variant.dpahe_link).await?)
     }
 }
