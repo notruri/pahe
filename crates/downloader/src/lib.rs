@@ -19,14 +19,16 @@ use tokio::time;
 
 #[derive(Debug, Clone)]
 pub struct DownloadConfig {
+    pub referer: String,
     pub url: String,
     pub output: PathBuf,
     pub connections: usize,
 }
 
 impl DownloadConfig {
-    pub fn new(url: impl Into<String>, output: PathBuf) -> Self {
+    pub fn new(referer: impl Into<String>, url: impl Into<String>, output: PathBuf) -> Self {
         Self {
+            referer: referer.into(),
             url: url.into(),
             output: output,
             connections: 8,
@@ -39,9 +41,9 @@ impl DownloadConfig {
     }
 }
 
-pub async fn suggest_filename(url: &str) -> Result<String> {
+pub async fn suggest_filename(referer: &str, url: &str) -> Result<String> {
     let client = Client::new();
-    suggest_filename_with_client(&client, url).await
+    suggest_filename_with_client(&client, referer, url).await
 }
 
 pub async fn download(config: DownloadConfig) -> Result<()> {
@@ -50,6 +52,7 @@ pub async fn download(config: DownloadConfig) -> Result<()> {
     let head =
         client
             .head(&config.url)
+            .header(header::REFERER, &config.referer)
             .send()
             .await
             .map_err(|source| DownloaderError::Request {
@@ -71,12 +74,13 @@ pub async fn download(config: DownloadConfig) -> Result<()> {
 
     eprintln!("\n\n");
 
-    if size.is_none() || !accepts_ranges {
-        return single_stream_download(&client, &config.url, &config.output, size).await;
+    if config.connections == 1 || size.is_none() || !accepts_ranges {
+        return single_stream_download(&client, &config.referer, &config.url, &config.output, size).await;
     }
 
     parallel_download(
         &client,
+        &config.referer,
         &config.url,
         &config.output,
         size.unwrap_or(0),
@@ -85,9 +89,10 @@ pub async fn download(config: DownloadConfig) -> Result<()> {
     .await
 }
 
-async fn suggest_filename_with_client(client: &Client, url: &str) -> Result<String> {
+async fn suggest_filename_with_client(client: &Client, referer: &str, url: &str) -> Result<String> {
     let response = client
         .head(url)
+        .header(header::REFERER, referer)
         .send()
         .await
         .map_err(|source| DownloaderError::Request {
@@ -186,6 +191,7 @@ fn filename_from_url(url: &str) -> String {
 
 async fn single_stream_download(
     client: &Client,
+    referer: &str,
     url: &str,
     output: &Path,
     total_size: Option<u64>,
@@ -193,6 +199,7 @@ async fn single_stream_download(
     let output_str = output.to_string_lossy();
     let mut response = client
         .get(url)
+        .header(header::REFERER, referer)
         .send()
         .await
         .map_err(|source| DownloaderError::Request {
@@ -248,6 +255,7 @@ async fn single_stream_download(
 
 async fn parallel_download(
     client: &Client,
+    referer: &str,
     url: &str,
     output: &Path,
     total_size: u64,
@@ -255,7 +263,7 @@ async fn parallel_download(
 ) -> Result<()> {
     let output_str = output.to_string_lossy();
     if total_size == 0 {
-        return single_stream_download(client, url, output, Some(total_size)).await;
+        return single_stream_download(client, referer, url, output, Some(total_size)).await;
     }
 
     let workers = connections.max(1).min(total_size as usize);
@@ -269,11 +277,12 @@ async fn parallel_download(
         }
         let end = ((idx as u64 + 1) * chunk_size).min(total_size) - 1;
         let client = client.clone();
+        let referer = referer.to_string();
         let url = url.to_string();
         let tx = tx.clone();
 
         tokio::spawn(async move {
-            let result = fetch_chunk(client, url, idx, start, end).await;
+            let result = fetch_chunk(client, referer, url, idx, start, end).await;
             let _ = tx.send(result).await;
         });
     }
@@ -477,6 +486,7 @@ fn format_bytes_f64(bytes: f64) -> String {
 
 async fn fetch_chunk(
     client: Client,
+    referer: String,
     url: String,
     idx: usize,
     start: u64,
@@ -486,6 +496,7 @@ async fn fetch_chunk(
     let response = client
         .get(&url)
         .header(header::RANGE, range)
+        .header(header::REFERER, referer)
         .send()
         .await
         .map_err(|source| DownloaderError::Request {
