@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 use inquire::{Select, Text};
 use owo_colors::OwoColorize;
@@ -59,9 +61,13 @@ struct DownloadArgs {
     #[arg(short, long)]
     url: Option<String>,
 
-    /// Output path for downloaded file (auto-detected from stream when omitted)
+    /// Output path for downloaded file
     #[arg(short, long)]
     output: Option<String>,
+
+    /// Output directory for downloaded files
+    #[arg(short, long)]
+    dir: Option<PathBuf>,
 
     /// Number of parallel connections
     #[arg(short = 'n', long, default_value_t = 8)]
@@ -173,20 +179,27 @@ async fn run_download(args: DownloadArgs) -> pahe::Result<()> {
         }
     };
 
-    let output = match args.output {
-        Some(path) => path,
+    let file_name: PathBuf = match args.output {
+        Some(path) => path.into(),
         None => {
             let guessed = suggest_filename(&url).await.map_err(|err| {
                 PaheError::Message(format!("failed to infer output filename: {err}"))
             })?;
-            guessed
+            guessed.into()
         }
     };
+
+    let output = match &args.dir {
+        Some(dir) => dir.join(file_name),
+        None => file_name,
+    };
+    
+    let output_str = output.to_string_lossy().into_owned();
 
     logger.info(format!(
         "downloading with {} connection(s) to {}",
         args.connections,
-        output.yellow()
+        output_str.yellow()
     ));
 
     download(DownloadConfig::new(url, output).connections(args.connections))

@@ -1,7 +1,7 @@
 mod errors;
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub use errors::{DownloaderError, Result};
@@ -15,15 +15,15 @@ use tokio::time;
 #[derive(Debug, Clone)]
 pub struct DownloadConfig {
     pub url: String,
-    pub output: String,
+    pub output: PathBuf,
     pub connections: usize,
 }
 
 impl DownloadConfig {
-    pub fn new(url: impl Into<String>, output: impl Into<String>) -> Self {
+    pub fn new(url: impl Into<String>, output: PathBuf) -> Self {
         Self {
             url: url.into(),
-            output: output.into(),
+            output: output,
             connections: 8,
         }
     }
@@ -180,9 +180,10 @@ fn filename_from_url(url: &str) -> String {
 async fn single_stream_download(
     client: &Client,
     url: &str,
-    output: &str,
+    output: &Path,
     total_size: Option<u64>,
 ) -> Result<()> {
+    let output_str = output.to_string_lossy();
     let mut response = client
         .get(url)
         .send()
@@ -203,7 +204,7 @@ async fn single_stream_download(
     let mut file = File::create(output)
         .await
         .map_err(|source| DownloaderError::Io {
-            context: format!("creating output file {output}"),
+            context: format!("creating output file {output_str}"),
             source,
         })?;
 
@@ -225,7 +226,7 @@ async fn single_stream_download(
         file.write_all(&chunk)
             .await
             .map_err(|source| DownloaderError::Io {
-                context: format!("writing output file {output}"),
+                context: format!("writing output file {output_str}"),
                 source,
             })?;
 
@@ -241,10 +242,11 @@ async fn single_stream_download(
 async fn parallel_download(
     client: &Client,
     url: &str,
-    output: &str,
+    output: &Path,
     total_size: u64,
     connections: usize,
 ) -> Result<()> {
+    let output_str = output.to_string_lossy();
     if total_size == 0 {
         return single_stream_download(client, url, output, Some(total_size)).await;
     }
@@ -275,7 +277,7 @@ async fn parallel_download(
     let mut file = File::create(output)
         .await
         .map_err(|source| DownloaderError::Io {
-            context: format!("creating output file {output}"),
+            context: format!("creating output file {output_str}"),
             source,
         })?;
 
@@ -299,7 +301,7 @@ async fn parallel_download(
                     file.write_all(&bytes)
                         .await
                         .map_err(|source| DownloaderError::Io {
-                            context: format!("writing output file {output}"),
+                            context: format!("writing output file {output_str}"),
                             source,
                         })?;
                     downloaded += bytes.len() as u64;
@@ -382,7 +384,7 @@ impl ProgressRenderer {
         let eta_text = eta
             .map(format_duration)
             .unwrap_or_else(|| "--:--".to_string());
-        
+
         let spinner = spinner.cyan();
         let bar = bar.green();
         let downloaded = downloaded.yellow();
@@ -471,7 +473,7 @@ async fn fetch_chunk(
     Ok((idx, bytes.to_vec()))
 }
 
-async fn ensure_parent_dir(output: &str) -> Result<()> {
+async fn ensure_parent_dir(output: &Path) -> Result<()> {
     let Some(parent) = Path::new(output).parent() else {
         return Ok(());
     };
