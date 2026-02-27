@@ -22,6 +22,8 @@ pub struct EpisodeVariant {
     pub resolution: i32,
     /// normalized audio language (`jp`, `eng`, `zh`, or fallback value).
     pub lang: String,
+    /// bluray encoded.
+    pub bluray: bool,
 }
 
 /// selection result that pairs a play page with the chosen variant.
@@ -300,6 +302,8 @@ impl PaheClient {
                 .unwrap_or(0);
 
             let mut lang = "jp".to_string();
+            let mut bd = false;
+
             for span in span_re.captures_iter(block) {
                 let content = span
                     .get(1)
@@ -315,11 +319,10 @@ impl PaheClient {
                         lang = "zh".to_string();
                         break;
                     }
-                    "bd" | "" => {}
-                    other => {
-                        lang = other.to_string();
-                        break;
+                    "bd" => {
+                        bd = true
                     }
+                    _ => {}
                 }
             }
 
@@ -328,6 +331,7 @@ impl PaheClient {
                 source_text: block.to_string(),
                 resolution,
                 lang,
+                bluray: bd
             });
         }
 
