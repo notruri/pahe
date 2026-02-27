@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, bail};
+use crate::errors::{KwikError, Result};
 use regex::Regex;
 use reqwest::cookie::Jar;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, ORIGIN, REFERER, USER_AGENT};
@@ -29,13 +29,19 @@ impl KwikClient {
         let client = Client::builder()
             .cookie_provider(jar.clone())
             .build()
-            .context("failed building reqwest client")?;
+            .map_err(|source| KwikError::BuildClient {
+                context: "building reqwest client",
+                source,
+            })?;
 
         let no_redirect_client = Client::builder()
             .cookie_provider(jar)
             .redirect(Policy::none())
             .build()
-            .context("failed building no-redirect client")?;
+            .map_err(|source| KwikError::BuildClient {
+                context: "building no-redirect client",
+                source,
+            })?;
 
         Ok(Self {
             client,
@@ -86,7 +92,7 @@ impl KwikClient {
         let sentinel = alphabet_key
             .chars()
             .nth(base)
-            .ok_or_else(|| anyhow!("invalid base index for alphabet key"))?;
+            .ok_or(KwikError::InvalidAlphabetBaseIndex { base })?;
 
         let mut output = String::new();
         let chars: Vec<char> = encoded.chars().collect();
@@ -141,7 +147,7 @@ impl KwikClient {
                     .captures(decoded)
                     .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
             })
-            .ok_or_else(|| anyhow!("failed to extract kwik post link"))?;
+            .ok_or(KwikError::MissingKwikPostLink)?;
 
         // Handle both quote styles and any attribute ordering.
         let token_re_1 = Regex::new(r#"name=[\"']_token[\"'][^>]*value=[\"']([^\"']+)[\"']"#)?;
@@ -150,7 +156,7 @@ impl KwikClient {
             .captures(decoded)
             .or_else(|| token_re_2.captures(decoded))
             .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
-            .ok_or_else(|| anyhow!("failed to extract _token"))?;
+            .ok_or(KwikError::MissingToken)?;
 
         Ok((link, token))
     }
@@ -172,7 +178,10 @@ impl KwikClient {
             req = req.header(ORIGIN, origin);
         }
 
-        let resp = req.send().await.context("kwik direct-link post failed")?;
+        let resp = req.send().await.map_err(|source| KwikError::Request {
+            context: format!("posting kwik direct link form {kwik_link}"),
+            source,
+        })?;
 
         if resp.status().as_u16() != 302 {
             let status = resp.status();
@@ -180,25 +189,27 @@ impl KwikClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<failed to read error body>".to_string());
-            bail!(
-                "kwik post did not return redirect, got {}\nresponse text:\n{}",
+            return Err(KwikError::HttpStatus {
+                context: "kwik direct-link post".to_string(),
                 status,
-                body
-            );
+                body,
+            });
         }
 
         let location = resp
             .headers()
             .get(LOCATION)
             .and_then(|h| h.to_str().ok())
-            .ok_or_else(|| anyhow!("missing redirect location header"))?;
+            .ok_or(KwikError::MissingRedirectLocation)?;
 
         Ok(location.to_string())
     }
 
     async fn fetch_kwik_dlink(&self, kwik_link: &str, retries: u8) -> Result<String> {
         if retries == 0 {
-            bail!("kwik retry limit exceeded for {kwik_link}");
+            return Err(KwikError::RetryLimitExceeded {
+                link: kwik_link.to_string(),
+            });
         }
 
         let resp = self
@@ -210,15 +221,35 @@ impl KwikClient {
             )
             .send()
             .await
-            .with_context(|| format!("failed to load kwik page {kwik_link}"))?;
+            .map_err(|source| KwikError::Request {
+                context: format!("loading kwik page {kwik_link}"),
+                source,
+            })?;
 
         if !resp.status().is_success() {
-            bail!("kwik page returned {}", resp.status());
+            let status = resp.status();
+            let body = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "<failed to read error body>".to_string());
+
+            return Err(KwikError::HttpStatus {
+                context: format!("kwik page {kwik_link}"),
+                status,
+                body,
+            });
         }
 
         // Keep for debugging/compatibility checks; jar shares all cookies across GET/POST clients.
         let _kwik_session = Self::kwik_session_from_response(&resp);
-        let page = resp.text().await?.replace(['\n', '\r'], "");
+        let page = resp
+            .text()
+            .await
+            .map_err(|source| KwikError::ResponseBody {
+                context: format!("reading kwik page body {kwik_link}"),
+                source,
+            })?
+            .replace(['\n', '\r'], "");
 
         let packed_re = Regex::new(
             r#"\(\s*\"([^\",]*)\"\s*,\s*\d+\s*,\s*\"([^\",]*)\"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)"#,
@@ -235,11 +266,11 @@ impl KwikClient {
         let offset = caps
             .get(3)
             .and_then(|m| m.as_str().parse::<i64>().ok())
-            .ok_or_else(|| anyhow!("invalid offset"))?;
+            .ok_or(KwikError::InvalidOffset)?;
         let base = caps
             .get(4)
             .and_then(|m| m.as_str().parse::<usize>().ok())
-            .ok_or_else(|| anyhow!("invalid base"))?;
+            .ok_or(KwikError::InvalidBase)?;
 
         let decoded = match self.decode_js_style(encoded, alphabet_key, offset, base) {
             Ok(v) => v,
@@ -256,18 +287,38 @@ impl KwikClient {
 
     /// extracts a kwik referer and final direct link from a `pahe.win` page.
     pub async fn extract_kwik_link(&self, pahe_link: &str) -> Result<DirectLink> {
-        let resp = self
-            .client
-            .get(pahe_link)
-            .send()
-            .await
-            .with_context(|| format!("failed loading pahe link {pahe_link}"))?;
+        let resp =
+            self.client
+                .get(pahe_link)
+                .send()
+                .await
+                .map_err(|source| KwikError::Request {
+                    context: format!("loading pahe link {pahe_link}"),
+                    source,
+                })?;
 
         if !resp.status().is_success() {
-            bail!("pahe link returned {}", resp.status());
+            let status = resp.status();
+            let body = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "<failed to read error body>".to_string());
+
+            return Err(KwikError::HttpStatus {
+                context: format!("pahe link {pahe_link}"),
+                status,
+                body,
+            });
         }
 
-        let body = resp.text().await?.replace(['\n', '\r'], "");
+        let body = resp
+            .text()
+            .await
+            .map_err(|source| KwikError::ResponseBody {
+                context: format!("reading pahe body {pahe_link}"),
+                source,
+            })?
+            .replace(['\n', '\r'], "");
 
         let kwik_direct_re = Regex::new(r#"\"(https?://kwik\.[^/\s\"]+/[^/\s\"]+/[^\"\s]*)\""#)?;
         let packed_re = Regex::new(
@@ -282,11 +333,11 @@ impl KwikClient {
             let offset = cap
                 .get(3)
                 .and_then(|m| m.as_str().parse::<i64>().ok())
-                .ok_or_else(|| anyhow!("invalid offset"))?;
+                .ok_or(KwikError::InvalidOffset)?;
             let base = cap
                 .get(4)
                 .and_then(|m| m.as_str().parse::<usize>().ok())
-                .ok_or_else(|| anyhow!("invalid base"))?;
+                .ok_or(KwikError::InvalidBase)?;
 
             let decoded = self.decode_js_style(encoded, alphabet_key, offset, base)?;
             kwik_direct_re
@@ -296,7 +347,7 @@ impl KwikClient {
         } else {
             None
         }
-        .ok_or_else(|| anyhow!("unable to extract kwik link from pahe page"))?;
+        .ok_or(KwikError::MissingKwikLink)?;
 
         let direct_link = self.fetch_kwik_dlink(&kwik_link, 5).await?;
         Ok(DirectLink {
