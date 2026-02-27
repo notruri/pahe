@@ -5,8 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap.workspace = true
-inquire = "0.7"
+inquire.workspace = true
 pahe.workspace = true
 tokio.workspace = true
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+owo-colors.workspace = true
