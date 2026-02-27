@@ -347,57 +347,60 @@ impl PaheClient {
                 context: "reading play page body".to_string(),
                 source,
             })?;
-        let compact = text.replace(['\n', '\r'], "");
 
-        let anchor_re = Regex::new(r#"<a href=\"(https://pahe\.win/[^\"]*)\"[^>]*>(.*?)</a>"#)?;
-        let res_re = Regex::new(r"\b(\d{3,4})p\b")?;
-        let span_re = Regex::new(r"<span[^>]*>([^<]*)</span>")?;
+        let doc = Html::parse_document(&text);
+        let anchor_sel = Selector::parse(r#"a[href^="https://pahe.win"]"#).unwrap();
+        let span_sel = Selector::parse("span").unwrap();
 
         let mut variants = Vec::new();
 
-        for cap in anchor_re.captures_iter(&compact) {
-            let dpahe_link = cap
-                .get(1)
-                .map(|m| m.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let block = cap.get(2).map(|m| m.as_str()).unwrap_or_default();
+        for a in doc.select(&anchor_sel) {
+            let dpahe_link = a.value().attr("href").unwrap_or_default().to_string();
 
-            let resolution = res_re
-                .captures(block)
-                .and_then(|m| m.get(1))
-                .and_then(|m| m.as_str().parse::<i32>().ok())
+            let block = a.inner_html();
+            let full_text = a.text().collect::<Vec<_>>().join(" ").to_lowercase();
+
+            // resolution
+            let resolution = full_text
+                .split_whitespace()
+                .find_map(|w| {
+                    if w.ends_with('p') {
+                        w.trim_end_matches('p').parse::<i32>().ok()
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(0);
 
+            // audio language
             let mut lang = "jp".to_string();
-            let mut bd = false;
+            
+            let mut bluray = false;
 
-            for span in span_re.captures_iter(block) {
-                let content = span
-                    .get(1)
-                    .map(|m| m.as_str().trim().to_lowercase())
-                    .unwrap_or_default();
-
+            for span in a.select(&span_sel) {
+                let content = span.text().collect::<String>().trim().to_lowercase();
                 match content.as_str() {
-                    "dub" => {
-                        lang = "eng".to_string();
+                    "bd" => {
+                        bluray = true;
+                    }
+                    "eng" => {
+                        lang = "en".to_string();
                         break;
                     }
                     "chi" => {
                         lang = "zh".to_string();
                         break;
                     }
-                    "bd" => bd = true,
                     _ => {}
                 }
             }
 
             variants.push(EpisodeVariant {
                 dpahe_link,
-                source_text: block.to_string(),
+                source_text: block,
                 resolution,
                 lang,
-                bluray: bd,
+                bluray,
             });
         }
 
