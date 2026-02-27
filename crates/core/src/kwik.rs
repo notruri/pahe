@@ -6,9 +6,12 @@ use reqwest::redirect::Policy;
 use reqwest::{Client, Response, Url};
 use std::sync::Arc;
 
+/// resolved download information returned by kwik extraction.
 #[derive(Debug, Clone)]
 pub struct DirectLink {
+    /// referer url that should be sent when requesting `direct_link`.
     pub referer: String,
+    /// final redirected media url.
     pub direct_link: String,
 }
 
@@ -19,6 +22,7 @@ pub struct KwikClient {
 }
 
 impl KwikClient {
+    /// creates a kwik client with shared cookie storage for get/post requests.
     pub fn new() -> Result<Self> {
         let jar = Arc::new(Jar::default());
 
@@ -250,6 +254,7 @@ impl KwikClient {
         self.fetch_kwik_direct(&link, &token).await
     }
 
+    /// extracts a kwik referer and final direct link from a `pahe.win` page.
     pub async fn extract_kwik_link(&self, pahe_link: &str) -> Result<DirectLink> {
         let resp = self
             .client

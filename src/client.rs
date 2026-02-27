@@ -11,17 +11,25 @@ use pahe_core::{DirectLink, KwikClient};
 
 use crate::errors::{PaheError, Result};
 
+/// download variant metadata parsed from a single animepahe play page.
 #[derive(Debug, Clone)]
 pub struct EpisodeVariant {
+    /// mirror link hosted on `pahe.win` that can be resolved into a direct file url.
     pub dpahe_link: String,
+    /// raw text block extracted from the source anchor html.
     pub source_text: String,
+    /// declared video resolution (for example `720` or `1080`).
     pub resolution: i32,
+    /// normalized audio language (`jp`, `eng`, `zh`, or fallback value).
     pub lang: String,
 }
 
+/// selection result that pairs a play page with the chosen variant.
 #[derive(Debug, Clone)]
 pub struct EpisodeSelection {
+    /// play page url used to build this selection.
     pub play_link: String,
+    /// chosen variant for the play page.
     pub variant: EpisodeVariant,
 }
 
@@ -43,10 +51,16 @@ pub struct PaheClient {
 }
 
 impl PaheClient {
+    /// creates a client without an explicit clearance cookie header.
+    ///
+    /// this is enough when animepahe is accessible without triggering ddos-guard.
     pub fn new() -> Result<Self> {
         Self::with_cookie_header(None)
     }
 
+    /// creates a client with a browser-exported cookie header.
+    ///
+    /// use this when animepahe returns ddos-guard challenge pages.
     pub fn new_with_clearance_cookie(cookie_header: impl Into<String>) -> Result<Self> {
         Self::with_cookie_header(Some(cookie_header.into()))
     }
@@ -158,6 +172,7 @@ impl PaheClient {
         })
     }
 
+    /// returns the total number of episodes reported by animepahe for a series.
     pub async fn get_series_episode_count(&self, series_link: &str) -> Result<i32> {
         let id = Self::anime_id(series_link)?;
         let url = format!("https://animepahe.si/api?m=release&id={id}&sort=episode_asc&page=1");
@@ -187,6 +202,9 @@ impl PaheClient {
         Ok(parsed.total)
     }
 
+    /// collects animepahe play links for an inclusive episode range.
+    ///
+    /// internally this walks api pages in chunks of 30 episodes.
     pub async fn fetch_series_episode_links(
         &self,
         series_link: &str,
@@ -232,6 +250,7 @@ impl PaheClient {
         Ok(links)
     }
 
+    /// parses all available mirrors/qualities from a play page.
     pub async fn fetch_episode_variants(&self, play_link: &str) -> Result<Vec<EpisodeVariant>> {
         let resp = self
             .client
@@ -319,6 +338,11 @@ impl PaheClient {
         Ok(variants)
     }
 
+    /// picks one variant by language and resolution preference.
+    ///
+    /// - `target_resolution == 0`: highest available resolution.
+    /// - `target_resolution == -1`: lowest available resolution.
+    /// - other values: exact match, then fallback to highest.
     pub fn select_variant(
         &self,
         variants: Vec<EpisodeVariant>,
@@ -356,6 +380,7 @@ impl PaheClient {
         selected.ok_or(PaheError::NoSelectableVariant)
     }
 
+    /// resolves a `pahe.win` variant into a final downloadable direct link.
     pub async fn resolve_direct_link(&self, variant: &EpisodeVariant) -> Result<DirectLink> {
         self.kwik
             .extract_kwik_link(&variant.dpahe_link)
