@@ -33,8 +33,10 @@ async fn main() -> pahe::Result<()> {
 
     let pahe = PaheBuilder::new().cookies_str(&args.cookies).build()?;
 
+    let info = pahe.get_series_metadata(&args.series).await?;
+
     let links = pahe
-        .fetch_series_episode_links(&args.series, args.episode, args.episode)
+        .fetch_series_episode_links(&info.id, args.episode, args.episode)
         .await?;
 
     let play_link = links

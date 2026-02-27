@@ -8,6 +8,7 @@ pahe-core = { path = "crates/core", version = "0" }
 anyhow.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+scraper.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -24,6 +25,7 @@ clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 regex = "1"
 reqwest = { version = "0.12", features = ["cookies", "rustls-tls", "json"] }
+scraper = { version = "0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

@@ -4,12 +4,19 @@ use reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, COOKIE, HeaderMap, HeaderValue, ORIGIN, REFERER, USER_AGENT,
 };
 use reqwest::{Client as ReqwestClient, Url};
+use scraper::{Html, Selector};
 use serde::Deserialize;
 use std::sync::Arc;
 
 use pahe_core::{DirectLink, KwikClient};
 
 use crate::errors::{PaheError, Result};
+
+#[derive(Debug, Clone)]
+pub struct Anime {
+    pub id: String,
+    pub title: Option<String>,
+}
 
 /// download variant metadata parsed from a single animepahe play page.
 #[derive(Debug, Clone)]
@@ -174,15 +181,51 @@ impl PaheClient {
         })
     }
 
-    /// returns the total number of episodes reported by animepahe for a series.
-    pub async fn get_series_episode_count(&self, series_link: &str) -> Result<i32> {
+    pub async fn get_series_metadata(&self, series_link: &str) -> Result<Anime> {
         let id = Self::anime_id(series_link)?;
+
+        let resp = self
+            .client
+            .get(series_link)
+            .headers(self.headers(series_link, false))
+            .send()
+            .await
+            .map_err(|source| PaheError::Request {
+                context: "getting anime metadata".into(),
+                source,
+            })?;
+
+        let resp = Self::ensure_success_or_ddg(
+            resp,
+            "animepahe release api",
+            self.cookie_header.is_some(),
+        )
+        .await?;
+
+        let doc =
+            Html::parse_document(&resp.text().await.map_err(|source| PaheError::Request {
+                context: "".to_string(),
+                source,
+            })?);
+
+        let mut title = None;
+
+        let sel = Selector::parse(".title-wrapper h1 span").expect("invalid selector");
+        if let Some(first) = doc.select(&sel).next() {
+            title = first.text().next().map(String::from);
+        };
+
+        Ok(Anime { id, title })
+    }
+
+    /// returns the total number of episodes reported by animepahe for a series.
+    pub async fn get_series_episode_count(&self, id: &str) -> Result<i32> {
         let url = format!("https://animepahe.si/api?m=release&id={id}&sort=episode_asc&page=1");
 
         let resp = self
             .client
             .get(url)
-            .headers(self.headers(series_link, true))
+            .headers(self.headers("https://animepahe.si", true))
             .send()
             .await
             .map_err(|source| PaheError::Request {
@@ -209,11 +252,10 @@ impl PaheClient {
     /// internally this walks api pages in chunks of 30 episodes.
     pub async fn fetch_series_episode_links(
         &self,
-        series_link: &str,
+        id: &str,
         from_episode: i32,
         to_episode: i32,
     ) -> Result<Vec<String>> {
-        let id = Self::anime_id(series_link)?;
         let start_page = ((from_episode - 1) / 30) + 1;
         let end_page = ((to_episode - 1) / 30) + 1;
         let mut links = Vec::new();
@@ -225,7 +267,7 @@ impl PaheClient {
             let resp = self
                 .client
                 .get(url)
-                .headers(self.headers(series_link, true))
+                .headers(self.headers("https://animepahe.si", true))
                 .send()
                 .await
                 .map_err(|source| PaheError::Request {
@@ -319,9 +361,7 @@ impl PaheClient {
                         lang = "zh".to_string();
                         break;
                     }
-                    "bd" => {
-                        bd = true
-                    }
+                    "bd" => bd = true,
                     _ => {}
                 }
             }
@@ -331,7 +371,7 @@ impl PaheClient {
                 source_text: block.to_string(),
                 resolution,
                 lang,
-                bluray: bd
+                bluray: bd,
             });
         }
 
