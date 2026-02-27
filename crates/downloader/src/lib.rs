@@ -368,8 +368,8 @@ impl ProgressRenderer {
             .unwrap_or(0.0)
             .clamp(0.0, 1.0);
 
-        let filled = (ratio * 20.0).round() as usize;
-        let empty = 20 - filled;
+        let filled = (ratio * 30.0).round() as usize;
+        let empty = 30 - filled;
         let bar = format!("[{}{}]", "█".repeat(filled), " ".repeat(empty));
 
         let eta = self
@@ -391,7 +391,9 @@ impl ProgressRenderer {
         let total = total.dimmed();
         let eta_text = eta_text.magenta();
 
-        eprint!("\r{spinner:>4} {bar}  {downloaded:>10} / {total:<10}  eta {eta_text}");
+        eprint!(
+            "\x1b[1A\x1b[2K\n\r{spinner:>4} {bar}  {downloaded:>10} / {total:<10}  eta {eta_text}"
+        );
 
         if done {
             eprintln!();
