@@ -11,7 +11,7 @@ struct Args {
     series: String,
 
     /// Cookies used to authenticate pahe requests
-    #[arg(short, long)]
+    #[arg(short, long, env = "PAHE_COOKIES")]
     cookies: String,
 
     /// Episode to fetch variants for (1-indexed)
