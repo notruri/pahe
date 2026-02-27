@@ -83,3 +83,4 @@ AnimePahe has a ddos-guard to prevent spamming, if ddos-guard blocks the request
 - this project is currently in alpha, and it may or may not work correctly
 - some animepahe requests may require ddos-guard clearance cookies.
 - pass cookie headers through the builder when needed.
+- if parallel downloads aren't working (eg; stalling), try reducing the connections or set it to single connection (`-n 1`)
