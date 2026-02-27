@@ -1,0 +1,9 @@
+[package]
+name = "pahe-cli"
+version = "0.0.1-alpha"
+edition = "2024"
+
+[dependencies]
+clap.workspace = true
+pahe.workspace = true
+tokio.workspace = true
