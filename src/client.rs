@@ -338,48 +338,6 @@ impl PaheClient {
         Ok(variants)
     }
 
-    /// picks one variant by language and resolution preference.
-    ///
-    /// - `target_resolution == 0`: highest available resolution.
-    /// - `target_resolution == -1`: lowest available resolution.
-    /// - other values: exact match, then fallback to highest.
-    pub fn select_variant(
-        &self,
-        variants: Vec<EpisodeVariant>,
-        target_resolution: i32,
-        audio_lang: &str,
-    ) -> Result<EpisodeVariant> {
-        let filtered: Vec<EpisodeVariant> = variants
-            .iter()
-            .filter(|v| match audio_lang {
-                "en" => v.lang == "eng",
-                "jp" => v.lang == "jp",
-                "zh" => v.lang == "zh",
-                _ => true,
-            })
-            .cloned()
-            .collect();
-
-        let pool = if filtered.is_empty() {
-            variants
-        } else {
-            filtered
-        };
-
-        let selected = if target_resolution == 0 {
-            pool.into_iter().max_by_key(|v| v.resolution)
-        } else if target_resolution == -1 {
-            pool.into_iter().min_by_key(|v| v.resolution)
-        } else {
-            pool.iter()
-                .find(|v| v.resolution == target_resolution)
-                .cloned()
-                .or_else(|| pool.into_iter().max_by_key(|v| v.resolution))
-        };
-
-        selected.ok_or(PaheError::NoSelectableVariant)
-    }
-
     /// resolves a `pahe.win` variant into a final downloadable direct link.
     pub async fn resolve_direct_link(&self, variant: &EpisodeVariant) -> Result<DirectLink> {
         Ok(self.kwik.extract_kwik_link(&variant.dpahe_link).await?)
@@ -389,15 +347,6 @@ impl PaheClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn variant(resolution: i32, lang: &str) -> EpisodeVariant {
-        EpisodeVariant {
-            dpahe_link: "https://pahe.win/mock".to_string(),
-            source_text: "source".to_string(),
-            resolution,
-            lang: lang.to_string(),
-        }
-    }
 
     #[test]
     fn anime_id_extracts_uuid_segment() {
@@ -422,46 +371,5 @@ mod tests {
             "script src=\"/.well-known/ddos-guard/js-challenge\""
         ));
         assert!(!PaheClient::detect_ddos_guard("<html>normal page</html>"));
-    }
-
-    #[test]
-    fn select_variant_prefers_requested_language_and_resolution() {
-        let client = PaheClient::new().expect("client should build");
-        let variants = vec![
-            variant(720, "jp"),
-            variant(1080, "eng"),
-            variant(480, "eng"),
-        ];
-
-        let selected = client
-            .select_variant(variants, 1080, "en")
-            .expect("selection should succeed");
-
-        assert_eq!(selected.lang, "eng");
-        assert_eq!(selected.resolution, 1080);
-    }
-
-    #[test]
-    fn select_variant_falls_back_to_highest_when_exact_resolution_missing() {
-        let client = PaheClient::new().expect("client should build");
-        let variants = vec![variant(720, "jp"), variant(1080, "jp"), variant(480, "jp")];
-
-        let selected = client
-            .select_variant(variants, 900, "jp")
-            .expect("fallback selection should succeed");
-
-        assert_eq!(selected.resolution, 1080);
-    }
-
-    #[test]
-    fn select_variant_uses_all_variants_when_language_filter_is_empty() {
-        let client = PaheClient::new().expect("client should build");
-        let variants = vec![variant(720, "jp"), variant(1080, "eng")];
-
-        let selected = client
-            .select_variant(variants, 0, "zh")
-            .expect("selection should still succeed");
-
-        assert_eq!(selected.resolution, 1080);
     }
 }
