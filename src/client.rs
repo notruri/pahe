@@ -54,6 +54,7 @@ struct ReleaseItem {
 }
 
 pub struct PaheClient {
+    base_domain: String,
     client: ReqwestClient,
     kwik: KwikClient,
     cookie_header: Option<String>,
@@ -63,21 +64,24 @@ impl PaheClient {
     /// creates a client without an explicit clearance cookie header.
     ///
     /// this is enough when animepahe is accessible without triggering ddos-guard.
-    pub fn new() -> Result<Self> {
-        Self::with_cookie_header(None)
+    pub fn new(base_domain: String) -> Result<Self> {
+        Self::with_cookie_header(base_domain, None)
     }
 
     /// creates a client with a browser-exported cookie header.
     ///
     /// use this when animepahe returns ddos-guard challenge pages.
-    pub fn new_with_clearance_cookie(cookie_header: impl Into<String>) -> Result<Self> {
-        Self::with_cookie_header(Some(cookie_header.into()))
+    pub fn new_with_clearance_cookie(
+        base_domain: String,
+        cookie_header: impl Into<String>,
+    ) -> Result<Self> {
+        Self::with_cookie_header(base_domain, Some(cookie_header.into()))
     }
 
-    fn with_cookie_header(cookie_header: Option<String>) -> Result<Self> {
+    fn with_cookie_header(base_domain: String, cookie_header: Option<String>) -> Result<Self> {
         let jar = Arc::new(Jar::default());
-        let animepahe_base =
-            Url::parse("https://animepahe.si/").map_err(|_| PaheError::AnimepaheBaseUrl)?;
+        let animepahe_base = Url::parse(format!("https://{base_domain}/").as_ref())
+            .map_err(|_| PaheError::AnimepaheBaseUrl)?;
 
         if let Some(ref cookie) = cookie_header {
             for part in cookie.split(';') {
@@ -94,6 +98,7 @@ impl PaheClient {
             .map_err(PaheError::BuildClient)?;
 
         Ok(Self {
+            base_domain,
             client,
             kwik: KwikClient::new()?,
             cookie_header,
@@ -117,7 +122,7 @@ impl PaheClient {
             headers.insert(REFERER, v);
         }
 
-        if let Ok(v) = HeaderValue::from_str("https://animepahe.si") {
+        if let Ok(v) = HeaderValue::from_str(format!("https://{}/", self.base_domain).as_ref()) {
             headers.insert(ORIGIN, v);
         }
 
@@ -220,12 +225,15 @@ impl PaheClient {
 
     /// returns the total number of episodes reported by animepahe for a series.
     pub async fn get_series_episode_count(&self, id: &str) -> Result<i32> {
-        let url = format!("https://animepahe.si/api?m=release&id={id}&sort=episode_asc&page=1");
+        let url = format!(
+            "https://{}/api?m=release&id={id}&sort=episode_asc&page=1",
+            self.base_domain
+        );
 
         let resp = self
             .client
             .get(url)
-            .headers(self.headers("https://animepahe.si", true))
+            .headers(self.headers(format!("https://{}/", self.base_domain).as_ref(), true))
             .send()
             .await
             .map_err(|source| PaheError::Request {
@@ -261,13 +269,15 @@ impl PaheClient {
         let mut links = Vec::new();
 
         for page in start_page..=end_page {
-            let url =
-                format!("https://animepahe.si/api?m=release&id={id}&sort=episode_asc&page={page}");
+            let url = format!(
+                "https://{}/api?m=release&id={id}&sort=episode_asc&page={page}",
+                self.base_domain
+            );
 
             let resp = self
                 .client
                 .get(url)
-                .headers(self.headers("https://animepahe.si", true))
+                .headers(self.headers(format!("https://{}/", self.base_domain).as_ref(), true))
                 .send()
                 .await
                 .map_err(|source| PaheError::Request {
@@ -300,7 +310,10 @@ impl PaheClient {
                     break;
                 }
 
-                links.push(format!("https://animepahe.si/play/{id}/{}", item.session));
+                links.push(format!(
+                    "https://{}/play/{id}/{}",
+                    self.base_domain, item.session
+                ));
             }
         }
 
@@ -405,17 +418,19 @@ impl PaheClient {
 mod tests {
     use super::*;
 
+    const BASE_DOMAIN: &str = "animepahe.si";
+
     #[test]
     fn anime_id_extracts_uuid_segment() {
-        let link = "https://animepahe.si/anime/123e4567-e89b-12d3-a456-426614174000";
-        let id = PaheClient::anime_id(link).expect("anime id should parse");
+        let link = format!("https://{BASE_DOMAIN}/anime/123e4567-e89b-12d3-a456-426614174000");
+        let id = PaheClient::anime_id(&link).expect("anime id should parse");
         assert_eq!(id, "123e4567-e89b-12d3-a456-426614174000");
     }
 
     #[test]
     fn anime_id_rejects_non_matching_link() {
-        let link = "https://animepahe.si/anime/not-a-uuid";
-        let err = PaheClient::anime_id(link).expect_err("invalid link should error");
+        let link = format!("https://{BASE_DOMAIN}/anime/not-a-uuid");
+        let err = PaheClient::anime_id(&link).expect_err("invalid link should error");
         assert!(matches!(err, PaheError::InvalidAnimeLink { .. }));
     }
 
