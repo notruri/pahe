@@ -60,7 +60,7 @@ pub enum PaheError {
 
     #[error("failed resolving direct link through kwik: {0}")]
     ResolveDirectLink(#[source] anyhow::Error),
-    
+
     #[error("episode not found: {0}")]
-    EpisodeNotFound(i32)
+    EpisodeNotFound(i32),
 }

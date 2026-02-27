@@ -385,3 +385,83 @@ impl PaheClient {
         Ok(self.kwik.extract_kwik_link(&variant.dpahe_link).await?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn variant(resolution: i32, lang: &str) -> EpisodeVariant {
+        EpisodeVariant {
+            dpahe_link: "https://pahe.win/mock".to_string(),
+            source_text: "source".to_string(),
+            resolution,
+            lang: lang.to_string(),
+        }
+    }
+
+    #[test]
+    fn anime_id_extracts_uuid_segment() {
+        let link = "https://animepahe.si/anime/123e4567-e89b-12d3-a456-426614174000";
+        let id = PaheClient::anime_id(link).expect("anime id should parse");
+        assert_eq!(id, "123e4567-e89b-12d3-a456-426614174000");
+    }
+
+    #[test]
+    fn anime_id_rejects_non_matching_link() {
+        let link = "https://animepahe.si/anime/not-a-uuid";
+        let err = PaheClient::anime_id(link).expect_err("invalid link should error");
+        assert!(matches!(err, PaheError::InvalidAnimeLink { .. }));
+    }
+
+    #[test]
+    fn detect_ddos_guard_matches_known_markers() {
+        assert!(PaheClient::detect_ddos_guard(
+            "<title>DDoS-Guard</title><p>Checking your browser before accessing</p>"
+        ));
+        assert!(PaheClient::detect_ddos_guard(
+            "script src=\"/.well-known/ddos-guard/js-challenge\""
+        ));
+        assert!(!PaheClient::detect_ddos_guard("<html>normal page</html>"));
+    }
+
+    #[test]
+    fn select_variant_prefers_requested_language_and_resolution() {
+        let client = PaheClient::new().expect("client should build");
+        let variants = vec![
+            variant(720, "jp"),
+            variant(1080, "eng"),
+            variant(480, "eng"),
+        ];
+
+        let selected = client
+            .select_variant(variants, 1080, "en")
+            .expect("selection should succeed");
+
+        assert_eq!(selected.lang, "eng");
+        assert_eq!(selected.resolution, 1080);
+    }
+
+    #[test]
+    fn select_variant_falls_back_to_highest_when_exact_resolution_missing() {
+        let client = PaheClient::new().expect("client should build");
+        let variants = vec![variant(720, "jp"), variant(1080, "jp"), variant(480, "jp")];
+
+        let selected = client
+            .select_variant(variants, 900, "jp")
+            .expect("fallback selection should succeed");
+
+        assert_eq!(selected.resolution, 1080);
+    }
+
+    #[test]
+    fn select_variant_uses_all_variants_when_language_filter_is_empty() {
+        let client = PaheClient::new().expect("client should build");
+        let variants = vec![variant(720, "jp"), variant(1080, "eng")];
+
+        let selected = client
+            .select_variant(variants, 0, "zh")
+            .expect("selection should still succeed");
+
+        assert_eq!(selected.resolution, 1080);
+    }
+}
