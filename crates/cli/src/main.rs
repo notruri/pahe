@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use clap::{Args, Parser, Subcommand};
 use inquire::{Select, Text};
@@ -34,9 +34,9 @@ struct ResolveArgs {
     #[arg(short, long, env = "PAHE_COOKIES")]
     cookies: Option<String>,
 
-    /// Episode to fetch variants for (1-indexed)
-    #[arg(short, long, default_value_t = 1)]
-    episode: i32,
+    /// Episodes to fetch variants for (1-indexed)
+    #[arg(short, long, default_value = "1")]
+    episodes: EpisodeRange,
 
     /// Quality to select (e.g. 1080p, 720p, highest, lowest)
     #[arg(short, long, default_value = "highest")]
@@ -81,7 +81,7 @@ struct DownloadArgs {
 struct RuntimeArgs {
     series: String,
     cookies: String,
-    episode: i32,
+    episodes: EpisodeRange,
     quality: String,
     lang: String,
 }
@@ -145,6 +145,45 @@ impl CliLogger {
     }
 }
 
+#[derive(Debug, Clone)]
+struct EpisodeRange {
+    start: i32,
+    end: i32,
+}
+
+impl FromStr for EpisodeRange {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some((start, end)) = s.split_once('-') {
+            let start: i32 = start.parse().map_err(|_| "invalid start")?;
+            let end: i32 = end.parse().map_err(|_| "invalid end")?;
+
+            if start > end {
+                return Err("start cannot be greater than end".into());
+            }
+
+            Ok(EpisodeRange { start, end })
+        } else {
+            let value: i32 = s.parse().map_err(|_| "invalid number")?;
+            Ok(EpisodeRange {
+                start: value,
+                end: value,
+            })
+        }
+    }
+}
+
+impl std::fmt::Display for EpisodeRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.start == self.end {
+            write!(f, "{}", self.start)
+        } else {
+            write!(f, "{}-{}", self.start, self.end)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> pahe::Result<()> {
     let cli = Cli::parse();
@@ -158,66 +197,74 @@ async fn main() -> pahe::Result<()> {
 
 async fn run_resolve(args: ResolveArgs) -> pahe::Result<()> {
     let logger = CliLogger::new(&args.log_level)?;
-    let resolved = resolve_episode_url(args, &logger).await?;
+    let resolves = resolve_episode_urls(args, &logger).await?;
 
-    logger.info("stream:");
-    logger.info(resolved.yellow().to_string());
+    for (i, resolved) in resolves.iter().enumerate() {
+        logger.info(format!(
+            "episode {}: {}",
+            i + 1,
+            resolved.yellow().to_string()
+        ));
+    }
+
     Ok(())
 }
 
 async fn run_download(args: DownloadArgs) -> pahe::Result<()> {
     let logger = CliLogger::new(&args.resolve.log_level)?;
 
-    let url = match args.url {
+    let urls = match args.url {
         Some(url) => {
             logger.info("using direct url provided by --url");
-            url
+            vec![url]
         }
         None => {
-            logger.info("resolving episode link before download");
-            resolve_episode_url(args.resolve, &logger).await?
+            logger.info("resolving episode links before download");
+            resolve_episode_urls(args.resolve, &logger).await?
         }
     };
 
-    let file_name: PathBuf = match args.output {
-        Some(path) => path.into(),
-        None => {
-            let guessed = suggest_filename(&url).await.map_err(|err| {
-                PaheError::Message(format!("failed to infer output filename: {err}"))
-            })?;
-            guessed.into()
-        }
-    };
+    for url in urls {
+        let file_name: PathBuf = match &args.output {
+            Some(path) => path.into(),
+            None => {
+                let guessed = suggest_filename(&url).await.map_err(|err| {
+                    PaheError::Message(format!("failed to infer output filename: {err}"))
+                })?;
+                guessed.into()
+            }
+        };
 
-    let output = match &args.dir {
-        Some(dir) => dir.join(file_name),
-        None => file_name,
-    };
-    
-    let output_str = output.to_string_lossy().into_owned();
+        let output = match &args.dir {
+            Some(dir) => dir.join(file_name),
+            None => file_name,
+        };
 
-    logger.info(format!(
-        "downloading with {} connection(s) to {}",
-        args.connections,
-        output_str.yellow()
-    ));
+        let output_str = output.to_string_lossy().into_owned();
 
-    download(DownloadConfig::new(url, output).connections(args.connections))
-        .await
-        .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
+        logger.info(format!(
+            "downloading with {} connection(s) to {}",
+            args.connections,
+            output_str.yellow()
+        ));
+
+        download(DownloadConfig::new(url, output).connections(args.connections))
+            .await
+            .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
+    }
 
     logger.info("download complete");
     Ok(())
 }
 
-async fn resolve_episode_url(args: ResolveArgs, logger: &CliLogger) -> pahe::Result<String> {
+async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> pahe::Result<Vec<String>> {
     let runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
         prompt_for_args(args)?
     } else {
         RuntimeArgs {
             series: args.series.expect("series checked as Some"),
             cookies: args.cookies.expect("cookies checked as Some"),
-            episode: args.episode,
+            episodes: args.episodes,
             quality: args.quality,
             lang: args.lang,
         }
@@ -236,27 +283,33 @@ async fn resolve_episode_url(args: ResolveArgs, logger: &CliLogger) -> pahe::Res
             .yellow()
     ));
 
-    logger.info(format!("retrieving {} episodes", runtime.episode.yellow()));
+    logger.info(format!("retrieving {} episodes", runtime.episodes.yellow()));
     let links = pahe
-        .fetch_series_episode_links(&info.id, runtime.episode, runtime.episode)
+        .fetch_series_episode_links(&info.id, runtime.episodes.start, runtime.episodes.end)
         .await?;
 
-    let play_link = links
-        .first()
-        .ok_or(PaheError::EpisodeNotFound(runtime.episode))?;
+    if links.is_empty() {
+        return Err(PaheError::EpisodeNotFound(runtime.episodes.start));
+    }
 
-    let variants = pahe.fetch_episode_variants(play_link).await?;
-    let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
-    let quality = format!("{}p", selected.resolution);
+    let mut results = Vec::new();
 
-    logger.info(format!("language: {}", selected.lang.yellow()));
-    logger.info(format!("quality: {}", quality.yellow()));
-    logger.info(format!("bluray: {}", selected.bluray.yellow()));
+    for link in links {
+        logger.info(format!("processing episode link: {}", link.yellow()));
 
-    logger.info("resolving stream link");
-    let resolved = pahe.resolve_direct_link(&selected).await?;
+        let variants = pahe.fetch_episode_variants(&link).await?;
+        let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
+        let quality = format!("{}p", selected.resolution);
+        let resolved = pahe.resolve_direct_link(&selected).await?;
 
-    Ok(resolved.direct_link)
+        results.push(resolved.direct_link);
+
+        logger.info(format!("language: {}", selected.lang.yellow()));
+        logger.info(format!("quality: {}", quality.yellow()));
+        logger.info(format!("bluray: {}", selected.bluray.yellow()));
+    }
+
+    Ok(results)
 }
 
 fn prompt_for_args(args: ResolveArgs) -> pahe::Result<RuntimeArgs> {
@@ -275,14 +328,14 @@ fn prompt_for_args(args: ResolveArgs) -> pahe::Result<RuntimeArgs> {
         .prompt()
         .map_err(|err| PaheError::Message(format!("failed to read cookies: {err}")))?;
 
-    let episode_input = Text::new("Episode number:")
-        .with_initial_value(&args.episode.to_string())
+    let episode_input = Text::new("Episodes:")
+        .with_initial_value(&args.episodes.to_string())
         .prompt()
         .map_err(|err| PaheError::Message(format!("failed to read episode: {err}")))?;
 
-    let episode = episode_input
+    let episodes = episode_input
         .trim()
-        .parse::<i32>()
+        .parse::<EpisodeRange>()
         .map_err(|_| PaheError::Message("episode must be a valid number".to_string()))?;
 
     let quality_choices = vec!["highest", "1080p", "720p", "480p", "lowest", "custom"];
@@ -310,7 +363,7 @@ fn prompt_for_args(args: ResolveArgs) -> pahe::Result<RuntimeArgs> {
     Ok(RuntimeArgs {
         series,
         cookies,
-        episode,
+        episodes,
         quality,
         lang,
     })
