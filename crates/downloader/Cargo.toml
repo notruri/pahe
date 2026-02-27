@@ -7,3 +7,4 @@ edition = "2024"
 reqwest.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
+owo-colors.workspace = true

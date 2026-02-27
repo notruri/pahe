@@ -2,12 +2,15 @@ mod errors;
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 pub use errors::{DownloaderError, Result};
+use owo_colors::OwoColorize;
 use reqwest::{Client, StatusCode, header};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
+use tokio::time;
 
 #[derive(Debug, Clone)]
 pub struct DownloadConfig {
@@ -62,7 +65,7 @@ pub async fn download(config: DownloadConfig) -> Result<()> {
         .is_some_and(|v| v.eq_ignore_ascii_case("bytes"));
 
     if size.is_none() || !accepts_ranges {
-        return single_stream_download(&client, &config.url, &config.output).await;
+        return single_stream_download(&client, &config.url, &config.output, size).await;
     }
 
     parallel_download(
@@ -174,8 +177,13 @@ fn filename_from_url(url: &str) -> String {
         .unwrap_or_else(|| "download.bin".to_string())
 }
 
-async fn single_stream_download(client: &Client, url: &str, output: &str) -> Result<()> {
-    let response = client
+async fn single_stream_download(
+    client: &Client,
+    url: &str,
+    output: &str,
+    total_size: Option<u64>,
+) -> Result<()> {
+    let mut response = client
         .get(url)
         .send()
         .await
@@ -191,14 +199,6 @@ async fn single_stream_download(client: &Client, url: &str, output: &str) -> Res
         });
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|source| DownloaderError::Request {
-            context: "reading response body".to_string(),
-            source,
-        })?;
-
     ensure_parent_dir(output).await?;
     let mut file = File::create(output)
         .await
@@ -207,12 +207,33 @@ async fn single_stream_download(client: &Client, url: &str, output: &str) -> Res
             source,
         })?;
 
-    file.write_all(&bytes)
-        .await
-        .map_err(|source| DownloaderError::Io {
-            context: format!("writing output file {output}"),
-            source,
-        })?;
+    let mut progress = ProgressRenderer::new(total_size);
+
+    loop {
+        let maybe_chunk = response
+            .chunk()
+            .await
+            .map_err(|source| DownloaderError::Request {
+                context: "reading response body".to_string(),
+                source,
+            })?;
+
+        let Some(chunk) = maybe_chunk else {
+            break;
+        };
+
+        file.write_all(&chunk)
+            .await
+            .map_err(|source| DownloaderError::Io {
+                context: format!("writing output file {output}"),
+                source,
+            })?;
+
+        progress.advance(chunk.len() as u64);
+        progress.draw(false);
+    }
+
+    progress.draw(true);
 
     Ok(())
 }
@@ -225,7 +246,7 @@ async fn parallel_download(
     connections: usize,
 ) -> Result<()> {
     if total_size == 0 {
-        return single_stream_download(client, url, output).await;
+        return single_stream_download(client, url, output, Some(total_size)).await;
     }
 
     let workers = connections.max(1).min(total_size as usize);
@@ -260,23 +281,158 @@ async fn parallel_download(
 
     let mut next = 0usize;
     let mut pending = BTreeMap::new();
+    let mut downloaded = 0u64;
+    let mut progress = ProgressRenderer::new(Some(total_size));
+    let mut ticker = time::interval(Duration::from_millis(120));
 
-    while let Some(msg) = rx.recv().await {
-        let (idx, bytes) = msg?;
-        pending.insert(idx, bytes);
+    loop {
+        tokio::select! {
+            biased;
+            maybe_msg = rx.recv() => {
+                let Some(msg) = maybe_msg else {
+                    break;
+                };
+                let (idx, bytes) = msg?;
+                pending.insert(idx, bytes);
 
-        while let Some(bytes) = pending.remove(&next) {
-            file.write_all(&bytes)
-                .await
-                .map_err(|source| DownloaderError::Io {
-                    context: format!("writing output file {output}"),
-                    source,
-                })?;
-            next += 1;
+                while let Some(bytes) = pending.remove(&next) {
+                    file.write_all(&bytes)
+                        .await
+                        .map_err(|source| DownloaderError::Io {
+                            context: format!("writing output file {output}"),
+                            source,
+                        })?;
+                    downloaded += bytes.len() as u64;
+                    progress.set(downloaded);
+                    progress.draw(false);
+                    next += 1;
+                }
+            }
+            _ = ticker.tick() => {
+                progress.draw(false);
+            }
         }
     }
 
+    progress.draw(true);
+
     Ok(())
+}
+
+struct ProgressRenderer {
+    total: Option<u64>,
+    downloaded: u64,
+    started_at: Instant,
+    spinner_step: usize,
+}
+
+impl ProgressRenderer {
+    fn new(total: Option<u64>) -> Self {
+        Self {
+            total,
+            downloaded: 0,
+            started_at: Instant::now(),
+            spinner_step: 0,
+        }
+    }
+
+    fn advance(&mut self, bytes: u64) {
+        self.downloaded = self.downloaded.saturating_add(bytes);
+    }
+
+    fn set(&mut self, bytes: u64) {
+        self.downloaded = bytes;
+    }
+
+    fn draw(&mut self, done: bool) {
+        let spinner = if done {
+            "✓"
+        } else {
+            const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let frame = FRAMES[self.spinner_step % FRAMES.len()];
+            self.spinner_step = self.spinner_step.wrapping_add(1);
+            frame
+        };
+
+        let ratio = self
+            .total
+            .map(|total| {
+                if total == 0 {
+                    1.0
+                } else {
+                    self.downloaded as f64 / total as f64
+                }
+            })
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
+
+        let filled = (ratio * 20.0).round() as usize;
+        let empty = 20 - filled;
+        let bar = format!("[{}{}]", "█".repeat(filled), " ".repeat(empty));
+
+        let eta = self
+            .total
+            .and_then(|total| estimate_eta(self.downloaded, total, self.started_at.elapsed()));
+
+        let downloaded = format_bytes(self.downloaded);
+        let total = self
+            .total
+            .map(format_bytes)
+            .unwrap_or_else(|| "unknown".to_string());
+        let eta_text = eta
+            .map(format_duration)
+            .unwrap_or_else(|| "--:--".to_string());
+        
+        let spinner = spinner.cyan();
+        let bar = bar.green();
+        let downloaded = downloaded.yellow();
+        let total = total.dimmed();
+        let eta_text = eta_text.magenta();
+
+        eprint!("\r{spinner:>4} {bar}  {downloaded:>10} / {total:<10}  eta {eta_text}");
+
+        if done {
+            eprintln!();
+        }
+    }
+}
+
+fn estimate_eta(downloaded: u64, total: u64, elapsed: Duration) -> Option<Duration> {
+    if downloaded == 0 || total <= downloaded || elapsed.is_zero() {
+        return None;
+    }
+
+    let speed = downloaded as f64 / elapsed.as_secs_f64();
+    if speed <= 0.0 {
+        return None;
+    }
+
+    let remaining = (total - downloaded) as f64 / speed;
+    Some(Duration::from_secs_f64(remaining.max(0.0)))
+}
+
+fn format_duration(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    let mins = secs / 60;
+    let rem = secs % 60;
+    format!("{mins:02}:{rem:02}")
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[unit])
+    } else {
+        format!("{value:.2} {}", UNITS[unit])
+    }
 }
 
 async fn fetch_chunk(

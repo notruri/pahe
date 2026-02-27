@@ -179,7 +179,6 @@ async fn run_download(args: DownloadArgs) -> pahe::Result<()> {
             let guessed = suggest_filename(&url).await.map_err(|err| {
                 PaheError::Message(format!("failed to infer output filename: {err}"))
             })?;
-            logger.info(format!("inferred output filename: {}", guessed.yellow()));
             guessed
         }
     };
@@ -217,7 +216,7 @@ async fn resolve_episode_url(args: ResolveArgs, logger: &CliLogger) -> pahe::Res
     logger.info(format!("getting info from: {}", runtime.series.yellow()));
     let info = pahe.get_series_metadata(&runtime.series).await?;
     logger.info(format!(
-        "Title: {}",
+        "title: {}",
         info.title
             .clone()
             .unwrap_or_else(|| "unknown".to_string())
@@ -235,6 +234,11 @@ async fn resolve_episode_url(args: ResolveArgs, logger: &CliLogger) -> pahe::Res
 
     let variants = pahe.fetch_episode_variants(play_link).await?;
     let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
+    let quality = format!("{}", selected.resolution);
+
+    logger.info(format!("language: {}", selected.lang.yellow()));
+    logger.info(format!("quality: {}", quality.yellow()));
+    logger.info(format!("bluray: {}", selected.bluray.yellow()));
 
     logger.info("resolving stream link");
     let resolved = pahe.resolve_direct_link(&selected).await?;
