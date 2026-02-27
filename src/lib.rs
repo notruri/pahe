@@ -1,7 +1,7 @@
-pub mod client;
 pub mod builder;
+pub mod client;
 pub mod errors;
 
-pub use client::*;
 pub use builder::*;
+pub use client::*;
 pub use errors::*;

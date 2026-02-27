@@ -1,7 +1,7 @@
 use pahe::PaheBuilder;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> pahe::Result<()> {
     let pahe = PaheBuilder::new()
         .cookies_str(
             "__ddgid_=VGWtUB15hlasBLCE; __ddg2_=kGckOKa1z5a2I7yi; __ddg1_=UgXYjtJdbr7gS8ZiQH8z;",

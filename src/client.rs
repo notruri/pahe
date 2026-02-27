@@ -1,14 +1,15 @@
-use anyhow::{anyhow, bail, Context, Result};
 use regex::Regex;
 use reqwest::cookie::Jar;
 use reqwest::header::{
-    HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, ORIGIN, REFERER, USER_AGENT,
+    ACCEPT, ACCEPT_LANGUAGE, COOKIE, HeaderMap, HeaderValue, ORIGIN, REFERER, USER_AGENT,
 };
 use reqwest::{Client as ReqwestClient, Url};
 use serde::Deserialize;
 use std::sync::Arc;
 
 use pahe_core::{DirectLink, KwikClient};
+
+use crate::errors::{PaheError, Result};
 
 #[derive(Debug, Clone)]
 pub struct EpisodeVariant {
@@ -52,7 +53,8 @@ impl PaheClient {
 
     fn with_cookie_header(cookie_header: Option<String>) -> Result<Self> {
         let jar = Arc::new(Jar::default());
-        let animepahe_base = Url::parse("https://animepahe.si/")?;
+        let animepahe_base =
+            Url::parse("https://animepahe.si/").map_err(|_| PaheError::AnimepaheBaseUrl)?;
 
         if let Some(ref cookie) = cookie_header {
             for part in cookie.split(';') {
@@ -66,11 +68,11 @@ impl PaheClient {
         let client = ReqwestClient::builder()
             .cookie_provider(jar)
             .build()
-            .context("failed building reqwest client")?;
+            .map_err(PaheError::BuildClient)?;
 
         Ok(Self {
             client,
-            kwik: KwikClient::new()?,
+            kwik: KwikClient::new().map_err(PaheError::BuildKwikClient)?,
             cookie_header,
         })
     }
@@ -110,7 +112,9 @@ impl PaheClient {
         let id = re
             .captures(link)
             .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
-            .ok_or_else(|| anyhow!("unable to parse anime id from {link}"))?;
+            .ok_or_else(|| PaheError::InvalidAnimeLink {
+                link: link.to_string(),
+            })?;
         Ok(id)
     }
 
@@ -141,10 +145,17 @@ impl PaheClient {
             } else {
                 "DDoS-Guard challenge detected. Solve challenge in a real browser and initialize with AnimepaheClient::new_with_clearance_cookie(...)."
             };
-            bail!("{context} returned 403 Forbidden (DDoS-Guard). {hint}")
+            return Err(PaheError::DdosGuard {
+                context: context.to_string(),
+                hint: hint.to_string(),
+            });
         }
 
-        bail!("{context} returned {}\nresponse text:\n{}", status, body)
+        Err(PaheError::HttpStatus {
+            context: context.to_string(),
+            status,
+            body,
+        })
     }
 
     pub async fn get_series_episode_count(&self, series_link: &str) -> Result<i32> {
@@ -157,7 +168,10 @@ impl PaheClient {
             .headers(self.headers(series_link, true))
             .send()
             .await
-            .context("animepahe release api request failed")?;
+            .map_err(|source| PaheError::Request {
+                context: "requesting animepahe release api".to_string(),
+                source,
+            })?;
 
         let resp = Self::ensure_success_or_ddg(
             resp,
@@ -166,7 +180,10 @@ impl PaheClient {
         )
         .await?;
 
-        let parsed: ReleasePage = resp.json().await.context("invalid release api json")?;
+        let parsed: ReleasePage = resp.json().await.map_err(|source| PaheError::Json {
+            context: "parsing release api json".to_string(),
+            source,
+        })?;
         Ok(parsed.total)
     }
 
@@ -191,7 +208,10 @@ impl PaheClient {
                 .headers(self.headers(series_link, true))
                 .send()
                 .await
-                .with_context(|| format!("failed loading api page {page}"))?;
+                .map_err(|source| PaheError::Request {
+                    context: format!("loading api page {page}"),
+                    source,
+                })?;
 
             let resp = Self::ensure_success_or_ddg(
                 resp,
@@ -200,7 +220,10 @@ impl PaheClient {
             )
             .await?;
 
-            let parsed: ReleasePage = resp.json().await.context("invalid release page json")?;
+            let parsed: ReleasePage = resp.json().await.map_err(|source| PaheError::Json {
+                context: format!("parsing release page {page} json"),
+                source,
+            })?;
             for item in parsed.data {
                 links.push(format!("https://animepahe.si/play/{id}/{}", item.session));
             }
@@ -216,7 +239,10 @@ impl PaheClient {
             .headers(self.headers(play_link, false))
             .send()
             .await
-            .with_context(|| format!("failed to get play page {play_link}"))?;
+            .map_err(|source| PaheError::Request {
+                context: format!("getting play page {play_link}"),
+                source,
+            })?;
 
         let resp = Self::ensure_success_or_ddg(
             resp,
@@ -225,7 +251,13 @@ impl PaheClient {
         )
         .await?;
 
-        let text = resp.text().await.context("unable to read play page body")?;
+        let text = resp
+            .text()
+            .await
+            .map_err(|source| PaheError::ResponseBody {
+                context: "reading play page body".to_string(),
+                source,
+            })?;
         let compact = text.replace(['\n', '\r'], "");
 
         let anchor_re = Regex::new(r#"<a href=\"(https://pahe\.win/[^\"]*)\"[^>]*>(.*?)</a>"#)?;
@@ -281,7 +313,7 @@ impl PaheClient {
         }
 
         if variants.is_empty() {
-            bail!("no pahe.win mirrors found in play page")
+            return Err(PaheError::NoMirrors);
         }
 
         Ok(variants)
@@ -321,10 +353,13 @@ impl PaheClient {
                 .or_else(|| pool.into_iter().max_by_key(|v| v.resolution))
         };
 
-        selected.ok_or_else(|| anyhow!("no selectable variant found"))
+        selected.ok_or(PaheError::NoSelectableVariant)
     }
 
     pub async fn resolve_direct_link(&self, variant: &EpisodeVariant) -> Result<DirectLink> {
-        self.kwik.extract_kwik_link(&variant.dpahe_link).await
+        self.kwik
+            .extract_kwik_link(&variant.dpahe_link)
+            .await
+            .map_err(PaheError::ResolveDirectLink)
     }
 }
