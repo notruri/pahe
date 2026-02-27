@@ -55,6 +55,7 @@ struct ReleaseItem {
 
 pub struct PaheClient {
     base_domain: String,
+    redirect_domain: String,
     client: ReqwestClient,
     kwik: KwikClient,
     cookie_header: Option<String>,
@@ -64,8 +65,8 @@ impl PaheClient {
     /// creates a client without an explicit clearance cookie header.
     ///
     /// this is enough when animepahe is accessible without triggering ddos-guard.
-    pub fn new(base_domain: String) -> Result<Self> {
-        Self::with_cookie_header(base_domain, None)
+    pub fn new(base_domain: String, redirect_domain: String) -> Result<Self> {
+        Self::with_cookie_header(base_domain, redirect_domain, None)
     }
 
     /// creates a client with a browser-exported cookie header.
@@ -73,12 +74,13 @@ impl PaheClient {
     /// use this when animepahe returns ddos-guard challenge pages.
     pub fn new_with_clearance_cookie(
         base_domain: String,
+        redirect_domain: String,
         cookie_header: impl Into<String>,
     ) -> Result<Self> {
-        Self::with_cookie_header(base_domain, Some(cookie_header.into()))
+        Self::with_cookie_header(base_domain, redirect_domain, Some(cookie_header.into()))
     }
 
-    fn with_cookie_header(base_domain: String, cookie_header: Option<String>) -> Result<Self> {
+    fn with_cookie_header(base_domain: String, redirect_domain: String, cookie_header: Option<String>) -> Result<Self> {
         let jar = Arc::new(Jar::default());
         let animepahe_base = Url::parse(format!("https://{base_domain}/").as_ref())
             .map_err(|_| PaheError::AnimepaheBaseUrl)?;
@@ -99,6 +101,7 @@ impl PaheClient {
 
         Ok(Self {
             base_domain,
+            redirect_domain,
             client,
             kwik: KwikClient::new()?,
             cookie_header,
@@ -349,7 +352,7 @@ impl PaheClient {
             })?;
 
         let doc = Html::parse_document(&text);
-        let anchor_sel = Selector::parse(r#"a[href^="https://pahe.win"]"#).unwrap();
+        let anchor_sel = Selector::parse(format!(r#"a[href^="https://{}"]"#, self.redirect_domain).as_ref()).unwrap();
         let span_sel = Selector::parse("span").unwrap();
 
         let mut variants = Vec::new();
