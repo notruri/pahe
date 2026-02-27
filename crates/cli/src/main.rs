@@ -7,23 +7,23 @@ use pahe::PaheError;
 #[command(author, version, about)]
 struct Args {
     /// AnimePahe series URL
-    #[arg(long)]
+    #[arg(short, long)]
     series: String,
 
     /// Cookies used to authenticate pahe requests
-    #[arg(long)]
+    #[arg(short, long)]
     cookies: String,
 
     /// Episode to fetch variants for (1-indexed)
-    #[arg(long, default_value_t = 1)]
+    #[arg(short, long, default_value_t = 1)]
     episode: i32,
 
     /// Quality to select (e.g. 1080p, 720p, highest, lowest)
-    #[arg(long, default_value = "highest")]
+    #[arg(short, long, default_value = "highest")]
     quality: String,
 
     /// Audio language code to select (e.g. jp, en)
-    #[arg(long, default_value = "jp")]
+    #[arg(short, long, default_value = "jp")]
     lang: String,
 }
 
