@@ -286,7 +286,20 @@ impl PaheClient {
                 context: format!("parsing release page {page} json"),
                 source,
             })?;
+
+            let mut current_index = (start_page - 1) * 30;
+
             for item in parsed.data {
+                current_index += 1;
+
+                if current_index < from_episode {
+                    continue;
+                }
+
+                if current_index > to_episode {
+                    break;
+                }
+
                 links.push(format!("https://animepahe.si/play/{id}/{}", item.session));
             }
         }
