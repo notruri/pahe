@@ -63,4 +63,7 @@ pub enum PaheError {
 
     #[error("episode not found: {0}")]
     EpisodeNotFound(i32),
+
+    #[error("{0}")]
+    Message(String),
 }
