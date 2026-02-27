@@ -51,7 +51,7 @@ struct ResolveArgs {
     log_level: String,
 
     /// Use interactive prompts to edit arguments before execution
-    #[arg(long)]
+    #[arg(short, long)]
     interactive: bool,
 }
 
