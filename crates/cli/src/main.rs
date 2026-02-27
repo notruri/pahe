@@ -294,8 +294,8 @@ async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> pahe::Re
 
     let mut results = Vec::new();
 
-    for link in links {
-        logger.info(format!("processing episode link: {}", link.yellow()));
+    for (i, link) in links.iter().enumerate() {
+        logger.info(format!("processing episode: {}", link.yellow()));
 
         let variants = pahe.fetch_episode_variants(&link).await?;
         let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
@@ -304,6 +304,7 @@ async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> pahe::Re
 
         results.push(resolved.direct_link);
 
+        logger.info(format!("episode: {}", (i + 1).yellow()));
         logger.info(format!("language: {}", selected.lang.yellow()));
         logger.info(format!("quality: {}", quality.yellow()));
         logger.info(format!("bluray: {}", selected.bluray.yellow()));
