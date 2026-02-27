@@ -2,7 +2,7 @@ use clap::{Args, Parser, Subcommand};
 use inquire::{Select, Text};
 use owo_colors::OwoColorize;
 use pahe::{EpisodeVariant, PaheBuilder, PaheError};
-use pahe_downloader::{DownloadConfig, download};
+use pahe_downloader::{DownloadConfig, download, suggest_filename};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -59,9 +59,9 @@ struct DownloadArgs {
     #[arg(short, long)]
     url: Option<String>,
 
-    /// Output path for downloaded file
+    /// Output path for downloaded file (auto-detected from stream when omitted)
     #[arg(short, long)]
-    output: String,
+    output: Option<String>,
 
     /// Number of parallel connections
     #[arg(short = 'n', long, default_value_t = 8)]
@@ -173,13 +173,24 @@ async fn run_download(args: DownloadArgs) -> pahe::Result<()> {
         }
     };
 
+    let output = match args.output {
+        Some(path) => path,
+        None => {
+            let guessed = suggest_filename(&url).await.map_err(|err| {
+                PaheError::Message(format!("failed to infer output filename: {err}"))
+            })?;
+            logger.info(format!("inferred output filename: {}", guessed.yellow()));
+            guessed
+        }
+    };
+
     logger.info(format!(
         "downloading with {} connection(s) to {}",
         args.connections,
-        args.output.yellow()
+        output.yellow()
     ));
 
-    download(DownloadConfig::new(url, args.output).connections(args.connections))
+    download(DownloadConfig::new(url, output).connections(args.connections))
         .await
         .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
 

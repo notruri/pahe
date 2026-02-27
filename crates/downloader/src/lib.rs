@@ -31,6 +31,11 @@ impl DownloadConfig {
     }
 }
 
+pub async fn suggest_filename(url: &str) -> Result<String> {
+    let client = Client::new();
+    suggest_filename_with_client(&client, url).await
+}
+
 pub async fn download(config: DownloadConfig) -> Result<()> {
     let client = Client::new();
 
@@ -68,6 +73,105 @@ pub async fn download(config: DownloadConfig) -> Result<()> {
         config.connections,
     )
     .await
+}
+
+async fn suggest_filename_with_client(client: &Client, url: &str) -> Result<String> {
+    let response = client
+        .head(url)
+        .send()
+        .await
+        .map_err(|source| DownloaderError::Request {
+            context: "requesting filename metadata".to_string(),
+            source,
+        })?;
+
+    if !response.status().is_success() {
+        return Err(DownloaderError::HttpStatus {
+            context: "requesting filename metadata".to_string(),
+            status: response.status(),
+        });
+    }
+
+    if let Some(content_disposition) = response
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|v| v.to_str().ok())
+        && let Some(filename) = parse_content_disposition_filename(content_disposition)
+    {
+        return Ok(filename);
+    }
+
+    Ok(filename_from_url(url))
+}
+
+fn parse_content_disposition_filename(content_disposition: &str) -> Option<String> {
+    for segment in content_disposition.split(';').map(str::trim) {
+        if let Some(value) = segment.strip_prefix("filename*=UTF-8''") {
+            let decoded = percent_decode_filename(value);
+            if !decoded.is_empty() {
+                return Some(decoded);
+            }
+        }
+
+        if let Some(value) = segment.strip_prefix("filename=") {
+            let clean = value.trim_matches('"').trim();
+            if !clean.is_empty() {
+                return Some(clean.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn percent_decode_filename(value: &str) -> String {
+    let mut bytes = Vec::with_capacity(value.len());
+    let mut iter = value.as_bytes().iter().copied();
+
+    while let Some(b) = iter.next() {
+        if b == b'%' {
+            let hi = iter.next();
+            let lo = iter.next();
+            if let (Some(hi), Some(lo)) = (hi, lo)
+                && let (Some(hi), Some(lo)) = (hex_value(hi), hex_value(lo))
+            {
+                bytes.push((hi << 4) | lo);
+                continue;
+            }
+            bytes.push(b'%');
+            if let Some(hi) = hi {
+                bytes.push(hi);
+            }
+            if let Some(lo) = lo {
+                bytes.push(lo);
+            }
+            continue;
+        }
+
+        bytes.push(b);
+    }
+
+    String::from_utf8_lossy(&bytes).to_string()
+}
+
+fn hex_value(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn filename_from_url(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|url| {
+            url.path_segments()
+                .and_then(|mut segments| segments.next_back().map(str::to_string))
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "download.bin".to_string())
 }
 
 async fn single_stream_download(client: &Client, url: &str, output: &str) -> Result<()> {
@@ -226,4 +330,35 @@ async fn ensure_parent_dir(output: &str) -> Result<()> {
             context: format!("creating output directory {}", parent.display()),
             source,
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{filename_from_url, parse_content_disposition_filename};
+
+    #[test]
+    fn parses_quoted_filename() {
+        let value = "attachment; filename=\"episode01.mkv\"";
+        assert_eq!(
+            parse_content_disposition_filename(value).as_deref(),
+            Some("episode01.mkv")
+        );
+    }
+
+    #[test]
+    fn parses_utf8_encoded_filename() {
+        let value = "attachment; filename*=UTF-8''Spy%20x%20Family%20S01E01.mp4";
+        assert_eq!(
+            parse_content_disposition_filename(value).as_deref(),
+            Some("Spy x Family S01E01.mp4")
+        );
+    }
+
+    #[test]
+    fn gets_filename_from_url_path() {
+        assert_eq!(
+            filename_from_url("https://cdn.example.com/videos/file-01.mp4?token=123"),
+            "file-01.mp4"
+        );
+    }
 }

@@ -19,11 +19,12 @@ small library for AnimePahe and Kwik derived from private sources, written in Ru
 `pahe-cli` now supports a wget-like parallel downloader command:
 
 ```bash
-pahe-cli download --url "https://example.com/file.mp4" --output file.mp4 --connections 8
+pahe-cli download --url "https://example.com/file.mp4" --connections 8
 ```
 
 or resolve from animepahe first, then download:
 
 ```bash
-pahe-cli download --series "https://animepahe.si/anime/<id>" --cookies "$PAHE_COOKIES" --episode 1 --output ep01.mp4
+pahe-cli download --series "https://animepahe.si/anime/<id>" --cookies "$PAHE_COOKIES" --episode 1
+# output is auto-detected from Content-Disposition filename when omitted
 ```
