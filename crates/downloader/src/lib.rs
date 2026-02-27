@@ -1,9 +1,14 @@
 mod errors;
 
 use std::collections::BTreeMap;
+use std::io::stderr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crossterm::{
+    cursor, execute,
+    terminal::{Clear, ClearType},
+};
 pub use errors::{DownloaderError, Result};
 use owo_colors::OwoColorize;
 use reqwest::{Client, StatusCode, header};
@@ -63,6 +68,8 @@ pub async fn download(config: DownloadConfig) -> Result<()> {
         .get(header::ACCEPT_RANGES)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.eq_ignore_ascii_case("bytes"));
+
+    eprintln!("\n\n");
 
     if size.is_none() || !accepts_ranges {
         return single_stream_download(&client, &config.url, &config.output, size).await;
@@ -347,6 +354,7 @@ impl ProgressRenderer {
     }
 
     fn draw(&mut self, done: bool) {
+        let mut stderr = stderr();
         let spinner = if done {
             "✓"
         } else {
@@ -368,9 +376,24 @@ impl ProgressRenderer {
             .unwrap_or(0.0)
             .clamp(0.0, 1.0);
 
-        let filled = (ratio * 30.0).round() as usize;
-        let empty = 30 - filled;
-        let bar = format!("[{}{}]", "█".repeat(filled), " ".repeat(empty));
+        let bar_width = 45.0;
+        let filled = (ratio * bar_width).round();
+        let empty = bar_width - filled;
+        let bar = format!(
+            "[{}{}]",
+            "█".repeat(filled as usize),
+            " ".repeat(empty as usize)
+        );
+
+        let elapsed = self.started_at.elapsed();
+
+        let speed_bps = if elapsed.as_secs_f64() > 0.0 {
+            self.downloaded as f64 / elapsed.as_secs_f64()
+        } else {
+            0.0
+        };
+
+        let speed_text = format!("{}/s", format_bytes_f64(speed_bps));
 
         let eta = self
             .total
@@ -391,13 +414,9 @@ impl ProgressRenderer {
         let total = total.dimmed();
         let eta_text = eta_text.magenta();
 
-        eprint!(
-            "\x1b[1A\x1b[2K\n\r{spinner:>4} {bar}  {downloaded:>10} / {total:<10}  eta {eta_text}"
-        );
-
-        if done {
-            eprintln!();
-        }
+        execute!(stderr, cursor::MoveUp(2), Clear(ClearType::CurrentLine),).unwrap();
+        eprintln!("{spinner:>4} {bar}  eta {eta_text}");
+        eprintln!("{downloaded:>14} / {total:<14}  {speed_text:>30}");
     }
 }
 
@@ -436,6 +455,23 @@ fn format_bytes(bytes: u64) -> String {
         format!("{} {}", bytes, UNITS[unit])
     } else {
         format!("{value:.2} {}", UNITS[unit])
+    }
+}
+
+fn format_bytes_f64(bytes: f64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes;
+    let mut unit = 0usize;
+
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{:.0} {}", value, UNITS[unit])
+    } else {
+        format!("{:.2} {}", value, UNITS[unit])
     }
 }
 

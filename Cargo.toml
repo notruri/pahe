@@ -22,6 +22,8 @@ members = [
 
 [workspace.dependencies]
 pahe = { path = "." }
+pahe-downloader = { path = "crates/downloader" }
+crossterm = "0.29"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 regex = "1"
@@ -33,5 +35,3 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util", "sync"] }
 owo-colors = { version = "4" }
 inquire = { version = "0.7" }
-
-pahe-downloader = { path = "crates/downloader" }
