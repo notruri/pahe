@@ -8,5 +8,3 @@ clap.workspace = true
 inquire = "0.7"
 pahe.workspace = true
 tokio.workspace = true
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }

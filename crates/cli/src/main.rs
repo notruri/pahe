@@ -1,8 +1,6 @@
 use clap::Parser;
 use inquire::{Select, Text};
 use pahe::{EpisodeVariant, PaheBuilder, PaheError};
-use tracing::{debug, info};
-use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -27,7 +25,7 @@ struct Args {
     #[arg(short, long, default_value = "jp")]
     lang: String,
 
-    /// Logging verbosity (error, warn, info, debug, trace)
+    /// Logging verbosity (error, warn, info, debug)
     #[arg(long, default_value = "info")]
     log_level: String,
 
@@ -45,10 +43,58 @@ struct RuntimeArgs {
     lang: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+}
+
+impl LogLevel {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "error" => Some(Self::Error),
+            "warn" | "warning" => Some(Self::Warn),
+            "info" => Some(Self::Info),
+            "debug" => Some(Self::Debug),
+            _ => None,
+        }
+    }
+}
+
+struct CliLogger {
+    level: LogLevel,
+}
+
+impl CliLogger {
+    fn new(level: &str) -> pahe::Result<Self> {
+        let level = LogLevel::parse(level).ok_or(PaheError::Message(format!(
+            "invalid log level: {level}. expected one of: error, warn, info, debug"
+        )))?;
+
+        Ok(Self { level })
+    }
+
+    fn log(&self, level: LogLevel, message: impl AsRef<str>) {
+        if level <= self.level {
+            println!("* {}", message.as_ref());
+        }
+    }
+
+    fn info(&self, message: impl AsRef<str>) {
+        self.log(LogLevel::Info, message);
+    }
+
+    fn debug(&self, message: impl AsRef<str>) {
+        self.log(LogLevel::Debug, message);
+    }
+}
+
 #[tokio::main]
 async fn main() -> pahe::Result<()> {
     let args = Args::parse();
-    init_logging(&args.log_level)?;
+    let logger = CliLogger::new(&args.log_level)?;
 
     let runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
         prompt_for_args(args)?
@@ -62,13 +108,17 @@ async fn main() -> pahe::Result<()> {
         }
     };
 
-    info!("building pahe client");
+    logger.info("Building pahe client");
     let pahe = PaheBuilder::new().cookies_str(&runtime.cookies).build()?;
 
-    info!(series = %runtime.series, "fetching series metadata");
+    logger.info(format!("Fetching series metadata from: {}", runtime.series));
     let info = pahe.get_series_metadata(&runtime.series).await?;
+    logger.info(format!(
+        "Title: {}",
+        info.title.clone().unwrap_or_else(|| "unknown".to_string())
+    ));
 
-    info!(episode = runtime.episode, "fetching episode links");
+    logger.info(format!("Fetching episode {} links", runtime.episode));
     let links = pahe
         .fetch_series_episode_links(&info.id, runtime.episode, runtime.episode)
         .await?;
@@ -77,30 +127,15 @@ async fn main() -> pahe::Result<()> {
         .first()
         .ok_or(PaheError::EpisodeNotFound(runtime.episode))?;
 
-    info!("fetching episode variants");
+    logger.info("Fetching episode variants");
     let variants = pahe.fetch_episode_variants(play_link).await?;
-    let selected = select_quality(variants, &runtime.quality, &runtime.lang)?;
+    let selected = select_quality(variants, &runtime.quality, &runtime.lang, &logger)?;
 
-    info!(
-        resolution = selected.resolution,
-        language = %selected.lang,
-        "resolving direct link"
-    );
+    logger.info("Resolving stream link");
     let resolved = pahe.resolve_direct_link(&selected).await?;
 
-    println!("{}", resolved.direct_link);
-    Ok(())
-}
-
-fn init_logging(level: &str) -> pahe::Result<()> {
-    let env_filter = EnvFilter::try_new(level)
-        .map_err(|_| PaheError::Message(format!("invalid log level: {level}")))?;
-
-    fmt()
-        .pretty()
-        .with_env_filter(env_filter)
-        .with_target(false)
-        .init();
+    println!("* stream:");
+    println!("  - episode {}: {}", runtime.episode, resolved.direct_link);
 
     Ok(())
 }
@@ -172,6 +207,7 @@ fn select_quality(
     variants: Vec<EpisodeVariant>,
     quality: &str,
     audio_lang: &str,
+    logger: &CliLogger,
 ) -> pahe::Result<EpisodeVariant> {
     let filtered: Vec<EpisodeVariant> = variants
         .iter()
@@ -190,10 +226,13 @@ fn select_quality(
         filtered
     };
 
-    debug!(
-        available_variants = pool.len(),
-        quality, audio_lang, "selecting quality variant"
-    );
+    logger.debug(format!(
+        "Selecting quality from {} variant(s) with quality={} and lang={}",
+        pool.len(),
+        quality,
+        audio_lang
+    ));
+
     let preference = parse_quality(quality).ok_or(PaheError::NoSelectableVariant)?;
 
     let selected = match preference {
