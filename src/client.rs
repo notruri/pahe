@@ -157,7 +157,7 @@ impl PaheClient {
             let hint = if cookie_hint {
                 "DDoS-Guard challenge detected even with provided cookie header. Refresh cookies from a real browser session."
             } else {
-                "DDoS-Guard challenge detected. Solve challenge in a real browser and initialize with AnimepaheClient::new_with_clearance_cookie(...)."
+                "DDoS-Guard challenge detected. Solve challenge in a real browser and initialize .cookies_str(COOKIES)"
             };
             return Err(PaheError::DdosGuard {
                 context: context.to_string(),
