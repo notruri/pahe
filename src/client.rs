@@ -1,0 +1,330 @@
+use anyhow::{anyhow, bail, Context, Result};
+use regex::Regex;
+use reqwest::cookie::Jar;
+use reqwest::header::{
+    HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, ORIGIN, REFERER, USER_AGENT,
+};
+use reqwest::{Client as ReqwestClient, Url};
+use serde::Deserialize;
+use std::sync::Arc;
+
+use pahe_core::{DirectLink, KwikClient};
+
+#[derive(Debug, Clone)]
+pub struct EpisodeVariant {
+    pub dpahe_link: String,
+    pub source_text: String,
+    pub resolution: i32,
+    pub lang: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct EpisodeSelection {
+    pub play_link: String,
+    pub variant: EpisodeVariant,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleasePage {
+    total: i32,
+    data: Vec<ReleaseItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleaseItem {
+    session: String,
+}
+
+pub struct PaheClient {
+    client: ReqwestClient,
+    kwik: KwikClient,
+    cookie_header: Option<String>,
+}
+
+impl PaheClient {
+    pub fn new() -> Result<Self> {
+        Self::with_cookie_header(None)
+    }
+
+    pub fn new_with_clearance_cookie(cookie_header: impl Into<String>) -> Result<Self> {
+        Self::with_cookie_header(Some(cookie_header.into()))
+    }
+
+    fn with_cookie_header(cookie_header: Option<String>) -> Result<Self> {
+        let jar = Arc::new(Jar::default());
+        let animepahe_base = Url::parse("https://animepahe.si/")?;
+
+        if let Some(ref cookie) = cookie_header {
+            for part in cookie.split(';') {
+                let piece = part.trim();
+                if !piece.is_empty() && piece.contains('=') {
+                    jar.add_cookie_str(piece, &animepahe_base);
+                }
+            }
+        }
+
+        let client = ReqwestClient::builder()
+            .cookie_provider(jar)
+            .build()
+            .context("failed building reqwest client")?;
+
+        Ok(Self {
+            client,
+            kwik: KwikClient::new()?,
+            cookie_header,
+        })
+    }
+
+    fn headers(&self, referer: &str, is_api: bool) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static(if is_api {
+                "application/json, text/javascript, */*; q=0.0"
+            } else {
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            }),
+        );
+        headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
+        headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"));
+
+        if let Ok(v) = HeaderValue::from_str(referer) {
+            headers.insert(REFERER, v);
+        }
+
+        if let Ok(v) = HeaderValue::from_str("https://animepahe.si") {
+            headers.insert(ORIGIN, v);
+        }
+
+        if let Some(cookie) = &self.cookie_header {
+            if let Ok(v) = HeaderValue::from_str(cookie) {
+                headers.insert(COOKIE, v);
+            }
+        }
+
+        headers
+    }
+
+    fn anime_id(link: &str) -> Result<String> {
+        let re = Regex::new(r"anime/([a-f0-9-]{36})")?;
+        let id = re
+            .captures(link)
+            .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+            .ok_or_else(|| anyhow!("unable to parse anime id from {link}"))?;
+        Ok(id)
+    }
+
+    fn detect_ddos_guard(body: &str) -> bool {
+        body.contains("DDoS-Guard")
+            || body.contains("/.well-known/ddos-guard/js-challenge")
+            || body.contains("Checking your browser before accessing")
+    }
+
+    async fn ensure_success_or_ddg(
+        response: reqwest::Response,
+        context: &str,
+        cookie_hint: bool,
+    ) -> Result<reqwest::Response> {
+        if response.status().is_success() {
+            return Ok(response);
+        }
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "<failed to read error body>".to_string());
+
+        if status.as_u16() == 403 && Self::detect_ddos_guard(&body) {
+            let hint = if cookie_hint {
+                "DDoS-Guard challenge detected even with provided cookie header. Refresh cookies from a real browser session."
+            } else {
+                "DDoS-Guard challenge detected. Solve challenge in a real browser and initialize with AnimepaheClient::new_with_clearance_cookie(...)."
+            };
+            bail!("{context} returned 403 Forbidden (DDoS-Guard). {hint}")
+        }
+
+        bail!("{context} returned {}\nresponse text:\n{}", status, body)
+    }
+
+    pub async fn get_series_episode_count(&self, series_link: &str) -> Result<i32> {
+        let id = Self::anime_id(series_link)?;
+        let url = format!("https://animepahe.si/api?m=release&id={id}&sort=episode_asc&page=1");
+
+        let resp = self
+            .client
+            .get(url)
+            .headers(self.headers(series_link, true))
+            .send()
+            .await
+            .context("animepahe release api request failed")?;
+
+        let resp = Self::ensure_success_or_ddg(
+            resp,
+            "animepahe release api",
+            self.cookie_header.is_some(),
+        )
+        .await?;
+
+        let parsed: ReleasePage = resp.json().await.context("invalid release api json")?;
+        Ok(parsed.total)
+    }
+
+    pub async fn fetch_series_episode_links(
+        &self,
+        series_link: &str,
+        from_episode: i32,
+        to_episode: i32,
+    ) -> Result<Vec<String>> {
+        let id = Self::anime_id(series_link)?;
+        let start_page = ((from_episode - 1) / 30) + 1;
+        let end_page = ((to_episode - 1) / 30) + 1;
+        let mut links = Vec::new();
+
+        for page in start_page..=end_page {
+            let url =
+                format!("https://animepahe.si/api?m=release&id={id}&sort=episode_asc&page={page}");
+
+            let resp = self
+                .client
+                .get(url)
+                .headers(self.headers(series_link, true))
+                .send()
+                .await
+                .with_context(|| format!("failed loading api page {page}"))?;
+
+            let resp = Self::ensure_success_or_ddg(
+                resp,
+                &format!("animepahe page {page}"),
+                self.cookie_header.is_some(),
+            )
+            .await?;
+
+            let parsed: ReleasePage = resp.json().await.context("invalid release page json")?;
+            for item in parsed.data {
+                links.push(format!("https://animepahe.si/play/{id}/{}", item.session));
+            }
+        }
+
+        Ok(links)
+    }
+
+    pub async fn fetch_episode_variants(&self, play_link: &str) -> Result<Vec<EpisodeVariant>> {
+        let resp = self
+            .client
+            .get(play_link)
+            .headers(self.headers(play_link, false))
+            .send()
+            .await
+            .with_context(|| format!("failed to get play page {play_link}"))?;
+
+        let resp = Self::ensure_success_or_ddg(
+            resp,
+            &format!("play page {play_link}"),
+            self.cookie_header.is_some(),
+        )
+        .await?;
+
+        let text = resp.text().await.context("unable to read play page body")?;
+        let compact = text.replace(['\n', '\r'], "");
+
+        let anchor_re = Regex::new(r#"<a href=\"(https://pahe\.win/[^\"]*)\"[^>]*>(.*?)</a>"#)?;
+        let res_re = Regex::new(r"\b(\d{3,4})p\b")?;
+        let span_re = Regex::new(r"<span[^>]*>([^<]*)</span>")?;
+
+        let mut variants = Vec::new();
+
+        for cap in anchor_re.captures_iter(&compact) {
+            let dpahe_link = cap
+                .get(1)
+                .map(|m| m.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let block = cap.get(2).map(|m| m.as_str()).unwrap_or_default();
+
+            let resolution = res_re
+                .captures(block)
+                .and_then(|m| m.get(1))
+                .and_then(|m| m.as_str().parse::<i32>().ok())
+                .unwrap_or(0);
+
+            let mut lang = "jp".to_string();
+            for span in span_re.captures_iter(block) {
+                let content = span
+                    .get(1)
+                    .map(|m| m.as_str().trim().to_lowercase())
+                    .unwrap_or_default();
+
+                match content.as_str() {
+                    "dub" => {
+                        lang = "eng".to_string();
+                        break;
+                    }
+                    "chi" => {
+                        lang = "zh".to_string();
+                        break;
+                    }
+                    "bd" | "" => {}
+                    other => {
+                        lang = other.to_string();
+                        break;
+                    }
+                }
+            }
+
+            variants.push(EpisodeVariant {
+                dpahe_link,
+                source_text: block.to_string(),
+                resolution,
+                lang,
+            });
+        }
+
+        if variants.is_empty() {
+            bail!("no pahe.win mirrors found in play page")
+        }
+
+        Ok(variants)
+    }
+
+    pub fn select_variant(
+        &self,
+        variants: Vec<EpisodeVariant>,
+        target_resolution: i32,
+        audio_lang: &str,
+    ) -> Result<EpisodeVariant> {
+        let filtered: Vec<EpisodeVariant> = variants
+            .iter()
+            .filter(|v| match audio_lang {
+                "en" => v.lang == "eng",
+                "jp" => v.lang == "jp",
+                "zh" => v.lang == "zh",
+                _ => true,
+            })
+            .cloned()
+            .collect();
+
+        let pool = if filtered.is_empty() {
+            variants
+        } else {
+            filtered
+        };
+
+        let selected = if target_resolution == 0 {
+            pool.into_iter().max_by_key(|v| v.resolution)
+        } else if target_resolution == -1 {
+            pool.into_iter().min_by_key(|v| v.resolution)
+        } else {
+            pool.iter()
+                .find(|v| v.resolution == target_resolution)
+                .cloned()
+                .or_else(|| pool.into_iter().max_by_key(|v| v.resolution))
+        };
+
+        selected.ok_or_else(|| anyhow!("no selectable variant found"))
+    }
+
+    pub async fn resolve_direct_link(&self, variant: &EpisodeVariant) -> Result<DirectLink> {
+        self.kwik.extract_kwik_link(&variant.dpahe_link).await
+    }
+}
