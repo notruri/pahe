@@ -7,5 +7,6 @@ edition = "2024"
 clap.workspace = true
 inquire.workspace = true
 pahe.workspace = true
+pahe-downloader.workspace = true
 tokio.workspace = true
 owo-colors.workspace = true

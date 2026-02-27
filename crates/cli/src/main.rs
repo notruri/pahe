@@ -1,11 +1,29 @@
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use inquire::{Select, Text};
 use owo_colors::OwoColorize;
 use pahe::{EpisodeVariant, PaheBuilder, PaheError};
+use pahe_downloader::{DownloadConfig, download};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    #[command(flatten)]
+    resolve: ResolveArgs,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Resolve and print a direct episode download URL
+    Resolve(ResolveArgs),
+    /// Download a file URL in parallel (wget-like)
+    Download(DownloadArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+struct ResolveArgs {
     /// AnimePahe series URL
     #[arg(short, long)]
     series: Option<String>,
@@ -33,6 +51,24 @@ struct Args {
     /// Use interactive prompts to edit arguments before execution
     #[arg(long)]
     interactive: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+struct DownloadArgs {
+    /// Direct URL to download. If omitted, resolves from pahe using resolve args.
+    #[arg(short, long)]
+    url: Option<String>,
+
+    /// Output path for downloaded file
+    #[arg(short, long)]
+    output: String,
+
+    /// Number of parallel connections
+    #[arg(short = 'n', long, default_value_t = 8)]
+    connections: usize,
+
+    #[command(flatten)]
+    resolve: ResolveArgs,
 }
 
 #[derive(Debug, Clone)]
@@ -105,9 +141,53 @@ impl CliLogger {
 
 #[tokio::main]
 async fn main() -> pahe::Result<()> {
-    let args = Args::parse();
-    let logger = CliLogger::new(&args.log_level)?;
+    let cli = Cli::parse();
 
+    match cli.command {
+        Some(Commands::Resolve(args)) => run_resolve(args).await,
+        Some(Commands::Download(args)) => run_download(args).await,
+        None => run_resolve(cli.resolve).await,
+    }
+}
+
+async fn run_resolve(args: ResolveArgs) -> pahe::Result<()> {
+    let logger = CliLogger::new(&args.log_level)?;
+    let resolved = resolve_episode_url(args, &logger).await?;
+
+    logger.info("stream:");
+    logger.info(resolved.yellow().to_string());
+    Ok(())
+}
+
+async fn run_download(args: DownloadArgs) -> pahe::Result<()> {
+    let logger = CliLogger::new(&args.resolve.log_level)?;
+
+    let url = match args.url {
+        Some(url) => {
+            logger.info("using direct url provided by --url");
+            url
+        }
+        None => {
+            logger.info("resolving episode link before download");
+            resolve_episode_url(args.resolve, &logger).await?
+        }
+    };
+
+    logger.info(format!(
+        "downloading with {} connection(s) to {}",
+        args.connections,
+        args.output.yellow()
+    ));
+
+    download(DownloadConfig::new(url, args.output).connections(args.connections))
+        .await
+        .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
+
+    logger.info("download complete");
+    Ok(())
+}
+
+async fn resolve_episode_url(args: ResolveArgs, logger: &CliLogger) -> pahe::Result<String> {
     let runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
         prompt_for_args(args)?
     } else {
@@ -143,22 +223,15 @@ async fn main() -> pahe::Result<()> {
         .ok_or(PaheError::EpisodeNotFound(runtime.episode))?;
 
     let variants = pahe.fetch_episode_variants(play_link).await?;
-    let selected = select_quality(variants, &runtime.quality, &runtime.lang, &logger)?;
+    let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
 
     logger.info("resolving stream link");
     let resolved = pahe.resolve_direct_link(&selected).await?;
 
-    logger.info("stream:");
-    logger.info(format!(
-        "episode {}: {}",
-        runtime.episode,
-        resolved.direct_link.yellow()
-    ));
-
-    Ok(())
+    Ok(resolved.direct_link)
 }
 
-fn prompt_for_args(args: Args) -> pahe::Result<RuntimeArgs> {
+fn prompt_for_args(args: ResolveArgs) -> pahe::Result<RuntimeArgs> {
     let series_default = args.series.unwrap_or_default();
     let cookies_default = args.cookies.unwrap_or_default();
 

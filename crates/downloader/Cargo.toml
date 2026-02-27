@@ -1,0 +1,9 @@
+[package]
+name = "pahe-downloader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+reqwest.workspace = true
+tokio.workspace = true
+thiserror.workspace = true

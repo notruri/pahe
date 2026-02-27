@@ -1115,6 +1115,7 @@ dependencies = [
  "inquire",
  "owo-colors",
  "pahe",
+ "pahe-downloader",
  "tokio",
 ]
 
@@ -1126,6 +1127,15 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "pahe-downloader"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
  "thiserror",
  "tokio",
 ]
