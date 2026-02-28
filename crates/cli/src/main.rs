@@ -120,7 +120,7 @@ impl CliLogger {
     }
 
     fn log(&self, level: LogLevel, message: impl AsRef<str>) {
-        let bullet = self.bullet();
+        let bullet = self.bullet(level);
 
         if level <= self.level {
             println!("\n{}{}", bullet, message.as_ref());
@@ -139,8 +139,8 @@ impl CliLogger {
         self.log(LogLevel::Debug, message);
     }
 
-    fn bullet(&self) -> Box<dyn std::fmt::Display> {
-        match self.level {
+    fn bullet(&self, level: LogLevel) -> Box<dyn std::fmt::Display> {
+        match level {
             LogLevel::Info => Box::new(" * ".green()),
             LogLevel::Error => Box::new(" * ".red()),
             LogLevel::Warn => Box::new(" * ".yellow()),
