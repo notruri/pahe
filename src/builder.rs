@@ -12,7 +12,11 @@ pub struct PaheBuilder {
 impl PaheBuilder {
     /// creates a new builder with no cookie header configured.
     pub fn new() -> Self {
-        Self { base_domain: BASE_DOMAIN.to_string(), redirect_domain: REDIRECTOR_DOMAIN.to_string(), cookies: None }
+        Self {
+            base_domain: BASE_DOMAIN.to_string(),
+            redirect_domain: REDIRECTOR_DOMAIN.to_string(),
+            cookies: None,
+        }
     }
 
     /// sets a raw cookie header string used for ddos-guard clearance.
@@ -20,7 +24,7 @@ impl PaheBuilder {
         self.cookies = Some(cookies.to_string());
         self
     }
-    
+
     /// sets the base domain for the client.
     pub fn base_domain(mut self, domain: &str) -> Self {
         self.base_domain = domain.to_string();
@@ -36,7 +40,11 @@ impl PaheBuilder {
     /// builds a [`PaheClient`] using the configured options.
     pub fn build(&self) -> Result<PaheClient> {
         if let Some(cookies) = &self.cookies {
-            return PaheClient::new_with_clearance_cookie(self.base_domain.clone(), self.redirect_domain.clone(), cookies);
+            return PaheClient::new_with_clearance_cookie(
+                self.base_domain.clone(),
+                self.redirect_domain.clone(),
+                cookies,
+            );
         }
 
         PaheClient::new(self.base_domain.clone(), self.redirect_domain.clone())

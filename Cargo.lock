@@ -1166,8 +1166,6 @@ dependencies = [
 name = "pahe-downloader"
 version = "0.1.0-alpha"
 dependencies = [
- "crossterm 0.29.0",
- "owo-colors",
  "reqwest",
  "thiserror",
  "tokio",

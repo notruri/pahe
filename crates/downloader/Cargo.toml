@@ -10,8 +10,6 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-crossterm.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
-owo-colors.workspace = true

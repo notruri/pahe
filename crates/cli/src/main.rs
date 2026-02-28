@@ -9,14 +9,13 @@ use std::{
 
 use clap::{Args, Parser, Subcommand};
 use crossterm::{
-    cursor,
-    execute,
+    cursor, execute,
     terminal::{Clear, ClearType},
 };
 use inquire::{Select, Text};
 use owo_colors::OwoColorize;
 use pahe::prelude::*;
-use pahe_downloader::{DownloadConfig, download, suggest_filename};
+use pahe_downloader::{DownloadEvent, DownloadRequest, download, suggest_filename};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -125,6 +124,120 @@ struct CliLogger {
     loading_padded: AtomicBool,
 }
 
+struct DownloadProgressRenderer {
+    enabled: bool,
+    initialized: bool,
+    spinner_step: usize,
+    total: Option<u64>,
+}
+
+impl DownloadProgressRenderer {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            initialized: false,
+            spinner_step: 0,
+            total: None,
+        }
+    }
+
+    fn handle(&mut self, event: DownloadEvent) {
+        if !self.enabled {
+            return;
+        }
+
+        match event {
+            DownloadEvent::Started { total_bytes, .. } => {
+                self.total = total_bytes;
+                self.draw_frame(0, total_bytes, Duration::ZERO, false);
+            }
+            DownloadEvent::Progress {
+                downloaded_bytes,
+                total_bytes,
+                elapsed,
+            } => {
+                self.total = total_bytes;
+                self.draw_frame(downloaded_bytes, total_bytes, elapsed, false);
+            }
+            DownloadEvent::Finished {
+                downloaded_bytes,
+                elapsed,
+            } => {
+                self.draw_frame(downloaded_bytes, self.total, elapsed, true);
+            }
+        }
+    }
+
+    fn draw_frame(&mut self, downloaded: u64, total: Option<u64>, elapsed: Duration, done: bool) {
+        let mut stdout = std::io::stdout();
+
+        if !self.initialized {
+            let _ = writeln!(stdout);
+            let _ = writeln!(stdout);
+            self.initialized = true;
+        }
+
+        let spinner = if done {
+            "✓"
+        } else {
+            const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let frame = FRAMES[self.spinner_step % FRAMES.len()];
+            self.spinner_step = self.spinner_step.wrapping_add(1);
+            frame
+        };
+
+        let ratio = total
+            .map(|total_bytes| {
+                if total_bytes == 0 {
+                    1.0
+                } else {
+                    downloaded as f64 / total_bytes as f64
+                }
+            })
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
+
+        let bar_width = 45.0;
+        let filled = (ratio * bar_width).round();
+        let empty = bar_width - filled;
+        let bar = format!(
+            "[{}{}]",
+            "█".repeat(filled as usize),
+            " ".repeat(empty as usize)
+        );
+
+        let speed_bps = if elapsed.as_secs_f64() > 0.0 {
+            downloaded as f64 / elapsed.as_secs_f64()
+        } else {
+            0.0
+        };
+        let speed_text = format!("{}/s", format_bytes_f64(speed_bps));
+
+        let eta = total.and_then(|total_bytes| estimate_eta(downloaded, total_bytes, elapsed));
+        let downloaded_text = format_bytes(downloaded);
+        let total_text = total
+            .map(format_bytes)
+            .unwrap_or_else(|| "unknown".to_string());
+        let eta_text = eta
+            .map(format_duration)
+            .unwrap_or_else(|| "--:--".to_string());
+
+        let spinner = spinner.cyan();
+        let bar = bar.green();
+        let downloaded_text = downloaded_text.yellow();
+        let total_text = total_text.dimmed();
+        let eta_text = eta_text.magenta();
+
+        let _ = execute!(stdout, cursor::MoveUp(2), Clear(ClearType::CurrentLine));
+        let _ = writeln!(stdout, "[{spinner}] {bar}  eta {eta_text}");
+        let _ = writeln!(
+            stdout,
+            "{downloaded_text:>14} / {total_text:<14}  {speed_text:>30}"
+        );
+        let _ = stdout.flush();
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum LogState {
     Success,
@@ -220,7 +333,11 @@ impl CliLogger {
         }
 
         self.loading_active.store(true, Ordering::Relaxed);
-        let _ = execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
+        let _ = execute!(
+            stdout,
+            cursor::MoveToColumn(0),
+            Clear(ClearType::CurrentLine)
+        );
         let _ = write!(stdout, "{} {}", frame, message);
         let _ = stdout.flush();
     }
@@ -228,7 +345,11 @@ impl CliLogger {
     fn clear_loading_line_if_needed(&self) {
         if self.loading_active.swap(false, Ordering::Relaxed) {
             let mut stdout = std::io::stdout();
-            let _ = execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
+            let _ = execute!(
+                stdout,
+                cursor::MoveToColumn(0),
+                Clear(ClearType::CurrentLine)
+            );
             if self.loading_padded.load(Ordering::Relaxed) {
                 let _ = execute!(
                     stdout,
@@ -327,7 +448,11 @@ async fn run_resolve(args: ResolveArgs) -> Result<()> {
 
     logger.success("Episodes has been resolved successfully");
     for (i, episode_url) in resolves.iter().enumerate() {
-        logger.success(format!("episode {}: {}", i + 1, episode_url.url.yellow().to_string()));
+        logger.success(format!(
+            "episode {}: {}",
+            i + 1,
+            episode_url.url.yellow().to_string()
+        ));
     }
 
     Ok(())
@@ -348,7 +473,9 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
                         suggest_filename(&episode_url.referer, &episode_url.url),
                     )
                     .await
-                    .map_err(|err| PaheError::Message(format!("failed to infer output filename: {err}")))?;
+                    .map_err(|err| {
+                        PaheError::Message(format!("failed to infer output filename: {err}"))
+                    })?;
                 guessed.into()
             }
         };
@@ -359,33 +486,24 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
         };
 
         let output_str = output.to_string_lossy().into_owned();
+        let mut progress_renderer = DownloadProgressRenderer::new(logger.level >= LogLevel::Info);
 
-        logger
-            .while_loading(
-                format!(
-                    "downloading with {} connection(s) to {}",
-                    args.connections,
-                    output_str.yellow()
-                ),
-                download(
-                    DownloadConfig::new(episode_url.referer, episode_url.url, output)
-                        .connections(args.connections),
-                ),
-            )
-            .await
-            .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
+        download(
+            DownloadRequest::new(episode_url.referer, episode_url.url, output)
+                .connections(args.connections),
+            |event| progress_renderer.handle(event),
+        )
+        .await
+        .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
+        logger.success(format!("done {}", output_str.yellow()));
 
-        logger.success(format!("completed {}", output_str.yellow()));
     }
 
     logger.success("download complete");
     Ok(())
 }
 
-async fn resolve_episode_urls(
-    args: ResolveArgs,
-    logger: &CliLogger,
-) -> Result<Vec<EpisodeURL>> {
+async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<Vec<EpisodeURL>> {
     let runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
         prompt_for_args(args)?
     } else {
@@ -582,5 +700,60 @@ fn parse_quality(raw_quality: &str) -> Option<QualityPreference> {
             let digits = normalized.trim_end_matches('p');
             digits.parse::<i32>().ok().map(QualityPreference::Exact)
         }
+    }
+}
+
+fn estimate_eta(downloaded: u64, total: u64, elapsed: Duration) -> Option<Duration> {
+    if downloaded == 0 || total <= downloaded || elapsed.is_zero() {
+        return None;
+    }
+
+    let speed = downloaded as f64 / elapsed.as_secs_f64();
+    if speed <= 0.0 {
+        return None;
+    }
+
+    let remaining = (total - downloaded) as f64 / speed;
+    Some(Duration::from_secs_f64(remaining.max(0.0)))
+}
+
+fn format_duration(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    let mins = secs / 60;
+    let rem = secs % 60;
+    format!("{mins:02}:{rem:02}")
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[unit])
+    } else {
+        format!("{value:.2} {}", UNITS[unit])
+    }
+}
+
+fn format_bytes_f64(bytes: f64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes;
+    let mut unit = 0usize;
+
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{:.0} {}", value, UNITS[unit])
+    } else {
+        format!("{value:.2} {}", UNITS[unit])
     }
 }

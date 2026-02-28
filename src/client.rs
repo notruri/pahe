@@ -80,7 +80,11 @@ impl PaheClient {
         Self::with_cookie_header(base_domain, redirect_domain, Some(cookie_header.into()))
     }
 
-    fn with_cookie_header(base_domain: String, redirect_domain: String, cookie_header: Option<String>) -> Result<Self> {
+    fn with_cookie_header(
+        base_domain: String,
+        redirect_domain: String,
+        cookie_header: Option<String>,
+    ) -> Result<Self> {
         let jar = Arc::new(Jar::default());
         let animepahe_base = Url::parse(format!("https://{base_domain}/").as_ref())
             .map_err(|_| PaheError::AnimepaheBaseUrl)?;
@@ -352,7 +356,9 @@ impl PaheClient {
             })?;
 
         let doc = Html::parse_document(&text);
-        let anchor_sel = Selector::parse(format!(r#"a[href^="https://{}"]"#, self.redirect_domain).as_ref()).unwrap();
+        let anchor_sel =
+            Selector::parse(format!(r#"a[href^="https://{}"]"#, self.redirect_domain).as_ref())
+                .unwrap();
         let span_sel = Selector::parse("span").unwrap();
 
         let mut variants = Vec::new();
@@ -377,7 +383,7 @@ impl PaheClient {
 
             // audio language
             let mut lang = "jp".to_string();
-            
+
             let mut bluray = false;
 
             for span in a.select(&span_sel) {
