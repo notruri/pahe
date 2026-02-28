@@ -1,4 +1,6 @@
-# pahe
+<p align="left">
+    <img src="assets/pahe.png" alt="Pahe" height="100">
+</p>
 
 small library for AnimePahe and Kwik in Rust
 
