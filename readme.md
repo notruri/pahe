@@ -1,8 +1,9 @@
-<p align="left">
+<h1 align="center">
     <img src="assets/pahe.png" alt="Pahe" height="100">
-</p>
+</h1>
+<p align="center">A small library and CLI to interact with AnimePahe and Kwik in Rust</p>
 
-A small library and CLI to interact with AnimePahe and Kwik in Rust
+<br>
 
 ## features
 
