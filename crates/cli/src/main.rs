@@ -205,11 +205,7 @@ async fn run_resolve(args: ResolveArgs) -> Result<()> {
 
     logger.success("Episodes has been resolved successfully");
     for (i, episode_url) in resolves.iter().enumerate() {
-        logger.success(format!(
-            "episode {}: {}",
-            i + 1,
-            episode_url.url.yellow()
-        ));
+        logger.success(format!("episode {}: {}", i + 1, episode_url.url.yellow()));
     }
 
     Ok(())
