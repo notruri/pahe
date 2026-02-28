@@ -131,6 +131,10 @@ impl CliLogger {
         self.log(LogLevel::Info, message);
     }
 
+    fn error(&self, message: impl AsRef<str>) {
+        self.log(LogLevel::Error, message);
+    }
+
     fn debug(&self, message: impl AsRef<str>) {
         self.log(LogLevel::Debug, message);
     }
@@ -141,6 +145,16 @@ impl CliLogger {
             LogLevel::Error => Box::new(" * ".red()),
             LogLevel::Warn => Box::new(" * ".yellow()),
             LogLevel::Debug => Box::new(" * ".purple()),
+        }
+    }
+}
+
+impl Cli {
+    fn log_level(&self) -> &str {
+        match &self.command {
+            Some(Commands::Resolve(args)) => &args.log_level,
+            Some(Commands::Download(args)) => &args.resolve.log_level,
+            None => &self.resolve.log_level,
         }
     }
 }
@@ -185,13 +199,22 @@ impl std::fmt::Display for EpisodeRange {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     let cli = Cli::parse();
 
-    match cli.command {
+    let logger = CliLogger::new(cli.log_level()).unwrap_or(CliLogger {
+        level: LogLevel::Error,
+    });
+
+    let result = match cli.command {
         Some(Commands::Resolve(args)) => run_resolve(args).await,
         Some(Commands::Download(args)) => run_download(args).await,
         None => run_resolve(cli.resolve).await,
+    };
+
+    if let Err(err) = result {
+        logger.error(format!("{err}"));
+        std::process::exit(1);
     }
 }
 
@@ -200,11 +223,7 @@ async fn run_resolve(args: ResolveArgs) -> Result<()> {
     let resolves = resolve_episode_urls(args, &logger).await?;
 
     for (i, (_, url)) in resolves.iter().enumerate() {
-        logger.info(format!(
-            "episode {}: {}",
-            i + 1,
-            url.yellow().to_string()
-        ));
+        logger.info(format!("episode {}: {}", i + 1, url.yellow().to_string()));
     }
 
     Ok(())
@@ -248,7 +267,10 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
     Ok(())
 }
 
-async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<Vec<(String, String)>> {
+async fn resolve_episode_urls(
+    args: ResolveArgs,
+    logger: &CliLogger,
+) -> Result<Vec<(String, String)>> {
     let runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
         prompt_for_args(args)?
     } else {
@@ -373,22 +395,20 @@ fn select_quality(
     audio_lang: &str,
     logger: &CliLogger,
 ) -> Result<EpisodeVariant> {
-    let filtered: Vec<EpisodeVariant> = variants
+    let pool: Vec<EpisodeVariant> = variants
         .iter()
         .filter(|variant| match audio_lang {
-            "en" => variant.lang == "eng",
+            "en" => variant.lang == "en",
             "jp" => variant.lang == "jp",
             "zh" => variant.lang == "zh",
-            _ => true,
+            _ => false,
         })
         .cloned()
         .collect();
 
-    let pool = if filtered.is_empty() {
-        variants
-    } else {
-        filtered
-    };
+    if pool.is_empty() {
+        return Err(PaheError::NoSelectableVariant);
+    }
 
     logger.debug(format!(
         "Selecting quality from {} variant(s) with quality={} and lang={}",
