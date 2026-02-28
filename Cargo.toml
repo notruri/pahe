@@ -32,7 +32,7 @@ version = "0.1.7-alpha"
 edition = "2024"
 authors = ["Ruri <ruriyoshinova@proton.me>"]
 license = "AGPL-3.0"
-repository = "https://git.ruri.one/ruri/pahe-rs"
+repository = "https://github.com/notruri/pahe"
 keywords = ["pahe"]
 categories = []
 
