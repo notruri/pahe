@@ -11,6 +11,12 @@
 - resolve kwik mirror links
 - concurrent downloads
 
+## supported platforms
+
+- Linux (x86_64)
+- Windows (x86_64)
+- macOS (i cant fully verify this)
+
 ## usage
 
 ### client

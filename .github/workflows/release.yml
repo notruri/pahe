@@ -56,3 +56,38 @@ jobs:
           files: |
             target/release/pahe-cli
             target/x86_64-pc-windows-gnu/release/pahe-cli.exe
+
+  build-macos-release:
+    needs: build-and-release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build workspace for macOS Intel (release)
+        run: cargo build --workspace --release --target x86_64-apple-darwin
+
+      - name: Build workspace for macOS Apple Silicon (release)
+        run: cargo build --workspace --release --target aarch64-apple-darwin
+
+      - name: Prepare release asset names
+        run: |
+          cp target/x86_64-apple-darwin/release/pahe-cli target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64
+          cp target/aarch64-apple-darwin/release/pahe-cli target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64
+
+      - name: Upload macOS artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64
+            target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64
