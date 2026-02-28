@@ -1,25 +1,21 @@
-use std::{
-    future::Future,
-    io::Write,
-    path::PathBuf,
-    str::FromStr,
-    sync::{
-        LazyLock,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
+mod logger;
+mod render;
+mod utils;
+
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 use clap::{Args, Parser, Subcommand};
-use crossterm::{
-    cursor, execute,
-    terminal::{Clear, ClearType},
-};
 use inquire::{Select, Text};
 use owo_colors::OwoColorize;
 use pahe::prelude::*;
-use pahe_downloader::{DownloadEvent, DownloadRequest, download, suggest_filename};
+use pahe_downloader::{DownloadRequest, download, suggest_filename};
 use regex::Regex;
+
+use crate::logger::{CliLogger, LogLevel};
+use crate::render::DownloadProgressRenderer;
 
 const ANIMEPAHE_DOMAIN: &str = "animepahe.si";
 
@@ -122,273 +118,6 @@ struct RuntimeArgs {
     episodes: EpisodeRange,
     quality: String,
     lang: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum LogLevel {
-    Error,
-    Warn,
-    Info,
-    Debug,
-}
-
-impl LogLevel {
-    fn parse(raw: &str) -> Option<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "error" => Some(Self::Error),
-            "warn" | "warning" => Some(Self::Warn),
-            "info" => Some(Self::Info),
-            "debug" => Some(Self::Debug),
-            _ => None,
-        }
-    }
-}
-
-struct CliLogger {
-    level: LogLevel,
-    spinner_step: AtomicUsize,
-    loading_active: AtomicBool,
-    loading_padded: AtomicBool,
-}
-
-struct DownloadProgressRenderer {
-    enabled: bool,
-    initialized: bool,
-    spinner_step: usize,
-    total: Option<u64>,
-}
-
-impl DownloadProgressRenderer {
-    fn new(enabled: bool) -> Self {
-        Self {
-            enabled,
-            initialized: false,
-            spinner_step: 0,
-            total: None,
-        }
-    }
-
-    fn handle(&mut self, event: DownloadEvent) {
-        if !self.enabled {
-            return;
-        }
-
-        match event {
-            DownloadEvent::Started { total_bytes, .. } => {
-                self.total = total_bytes;
-                self.draw_frame(0, total_bytes, Duration::ZERO, false);
-            }
-            DownloadEvent::Progress {
-                downloaded_bytes,
-                total_bytes,
-                elapsed,
-            } => {
-                self.total = total_bytes;
-                self.draw_frame(downloaded_bytes, total_bytes, elapsed, false);
-            }
-            DownloadEvent::Finished {
-                downloaded_bytes,
-                elapsed,
-            } => {
-                self.draw_frame(downloaded_bytes, self.total, elapsed, true);
-            }
-        }
-    }
-
-    fn draw_frame(&mut self, downloaded: u64, total: Option<u64>, elapsed: Duration, done: bool) {
-        let mut stdout = std::io::stdout();
-
-        if !self.initialized {
-            let _ = writeln!(stdout);
-            let _ = writeln!(stdout);
-            self.initialized = true;
-        }
-
-        let spinner = if done {
-            "✓"
-        } else {
-            const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let frame = FRAMES[self.spinner_step % FRAMES.len()];
-            self.spinner_step = self.spinner_step.wrapping_add(1);
-            frame
-        };
-
-        let ratio = total
-            .map(|total_bytes| {
-                if total_bytes == 0 {
-                    1.0
-                } else {
-                    downloaded as f64 / total_bytes as f64
-                }
-            })
-            .unwrap_or(0.0)
-            .clamp(0.0, 1.0);
-
-        let bar_width = 45.0;
-        let filled = (ratio * bar_width).round();
-        let empty = bar_width - filled;
-        let bar = format!(
-            "[{}{}]",
-            "█".repeat(filled as usize),
-            " ".repeat(empty as usize)
-        );
-
-        let speed_bps = if elapsed.as_secs_f64() > 0.0 {
-            downloaded as f64 / elapsed.as_secs_f64()
-        } else {
-            0.0
-        };
-        let speed_text = format!("{}/s", format_bytes_f64(speed_bps));
-
-        let eta = total.and_then(|total_bytes| estimate_eta(downloaded, total_bytes, elapsed));
-        let downloaded_text = format_bytes(downloaded);
-        let total_text = total
-            .map(format_bytes)
-            .unwrap_or_else(|| "unknown".to_string());
-        let eta_text = eta
-            .map(format_duration)
-            .unwrap_or_else(|| "--:--".to_string());
-
-        let spinner = spinner.cyan();
-        let bar = bar.green();
-        let downloaded_text = downloaded_text.yellow();
-        let total_text = total_text.dimmed();
-        let eta_text = eta_text.magenta();
-
-        let _ = execute!(stdout, cursor::MoveUp(2), Clear(ClearType::CurrentLine));
-        let _ = writeln!(stdout, "[{spinner}] {bar}  eta {eta_text}");
-        let _ = writeln!(
-            stdout,
-            "{downloaded_text:>14} / {total_text:<14}  {speed_text:>30}"
-        );
-        let _ = stdout.flush();
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum LogState {
-    Success,
-    Failed,
-    Debug,
-}
-
-impl CliLogger {
-    fn new(level: &str) -> Result<Self> {
-        let level = LogLevel::parse(level).ok_or(PaheError::Message(format!(
-            "invalid log level: {level}. expected one of: error, warn, info, debug"
-        )))?;
-
-        Ok(Self {
-            level,
-            spinner_step: AtomicUsize::new(0),
-            loading_active: AtomicBool::new(false),
-            loading_padded: AtomicBool::new(false),
-        })
-    }
-
-    fn log(&self, level: LogLevel, state: LogState, message: impl AsRef<str>) {
-        self.clear_loading_line_if_needed();
-        let icon = self.icon(state);
-
-        if level <= self.level {
-            println!("{} {}", icon, message.as_ref());
-        }
-    }
-
-    fn loading(&self, message: impl AsRef<str>) {
-        if LogLevel::Info > self.level {
-            return;
-        }
-
-        self.draw_loading_frame(message.as_ref());
-    }
-
-    fn success(&self, message: impl AsRef<str>) {
-        self.log(LogLevel::Info, LogState::Success, message);
-    }
-
-    fn failed(&self, message: impl AsRef<str>) {
-        self.log(LogLevel::Error, LogState::Failed, message);
-    }
-
-    fn debug(&self, message: impl AsRef<str>) {
-        self.log(LogLevel::Debug, LogState::Debug, message);
-    }
-
-    fn icon(&self, state: LogState) -> Box<dyn std::fmt::Display> {
-        match state {
-            LogState::Success => Box::new("[✓]".green()),
-            LogState::Failed => Box::new("[✗]".red()),
-            LogState::Debug => Box::new("[λ]".purple()),
-        }
-    }
-
-    async fn while_loading<F, T>(&self, message: impl Into<String>, future: F) -> T
-    where
-        F: Future<Output = T>,
-    {
-        if LogLevel::Info > self.level {
-            return future.await;
-        }
-
-        let message = message.into();
-        let mut ticker = tokio::time::interval(Duration::from_millis(120));
-        let mut future = Box::pin(future);
-        self.loading_active.store(true, Ordering::Relaxed);
-
-        loop {
-            tokio::select! {
-                result = &mut future => {
-                    self.clear_loading_line_if_needed();
-                    return result;
-                }
-                _ = ticker.tick() => {
-                    self.draw_loading_frame(&message);
-                }
-            }
-        }
-    }
-
-    fn draw_loading_frame(&self, message: &str) {
-        const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let idx = self.spinner_step.fetch_add(1, Ordering::Relaxed);
-        let frame = FRAMES[idx % FRAMES.len()].yellow();
-        let mut stdout = std::io::stdout();
-
-        if !self.loading_padded.swap(true, Ordering::Relaxed) {
-            let _ = writeln!(stdout);
-        }
-
-        self.loading_active.store(true, Ordering::Relaxed);
-        let _ = execute!(
-            stdout,
-            cursor::MoveToColumn(0),
-            Clear(ClearType::CurrentLine)
-        );
-        let _ = write!(stdout, "{} {}", frame, message);
-        let _ = stdout.flush();
-    }
-
-    fn clear_loading_line_if_needed(&self) {
-        if self.loading_active.swap(false, Ordering::Relaxed) {
-            let mut stdout = std::io::stdout();
-            let _ = execute!(
-                stdout,
-                cursor::MoveToColumn(0),
-                Clear(ClearType::CurrentLine)
-            );
-            if self.loading_padded.load(Ordering::Relaxed) {
-                let _ = execute!(
-                    stdout,
-                    cursor::MoveUp(1),
-                    cursor::MoveToColumn(0),
-                    Clear(ClearType::CurrentLine)
-                );
-            }
-            let _ = stdout.flush();
-            self.loading_padded.store(false, Ordering::Relaxed);
-        }
-    }
 }
 
 impl Cli {
@@ -750,68 +479,14 @@ fn parse_quality(raw_quality: &str) -> Option<QualityPreference> {
     }
 }
 
-fn estimate_eta(downloaded: u64, total: u64, elapsed: Duration) -> Option<Duration> {
-    if downloaded == 0 || total <= downloaded || elapsed.is_zero() {
-        return None;
-    }
-
-    let speed = downloaded as f64 / elapsed.as_secs_f64();
-    if speed <= 0.0 {
-        return None;
-    }
-
-    let remaining = (total - downloaded) as f64 / speed;
-    Some(Duration::from_secs_f64(remaining.max(0.0)))
-}
-
-fn format_duration(duration: Duration) -> String {
-    let secs = duration.as_secs();
-    let mins = secs / 60;
-    let rem = secs % 60;
-    format!("{mins:02}:{rem:02}")
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut value = bytes as f64;
-    let mut unit = 0usize;
-
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-
-    if unit == 0 {
-        format!("{} {}", bytes, UNITS[unit])
-    } else {
-        format!("{value:.2} {}", UNITS[unit])
-    }
-}
-
-fn format_bytes_f64(bytes: f64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut value = bytes;
-    let mut unit = 0usize;
-
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-
-    if unit == 0 {
-        format!("{:.0} {}", value, UNITS[unit])
-    } else {
-        format!("{value:.2} {}", UNITS[unit])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn normalize_series_link_accepts_anime_link() {
-        let input = format!("https://{ANIMEPAHE_DOMAIN}/anime/123e4567-e89b-12d3-a456-426614174000");
+        let input =
+            format!("https://{ANIMEPAHE_DOMAIN}/anime/123e4567-e89b-12d3-a456-426614174000");
         let normalized = normalize_series_link(&input).expect("anime link should be valid");
         assert_eq!(
             normalized,
@@ -821,7 +496,9 @@ mod tests {
 
     #[test]
     fn normalize_series_link_accepts_play_link() {
-        let input = format!("https://{ANIMEPAHE_DOMAIN}/play/123e4567-e89b-12d3-a456-426614174000/3cf1e5860ff5e9f766b36241c4dd6d48de3ef45d41183ecd079e1772aeb27c3c");
+        let input = format!(
+            "https://{ANIMEPAHE_DOMAIN}/play/123e4567-e89b-12d3-a456-426614174000/3cf1e5860ff5e9f766b36241c4dd6d48de3ef45d41183ecd079e1772aeb27c3c"
+        );
         let normalized = normalize_series_link(&input).expect("play link should be valid");
         assert_eq!(
             normalized,
