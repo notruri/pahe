@@ -50,3 +50,9 @@ impl PaheBuilder {
         PaheClient::new(self.base_domain.clone(), self.redirect_domain.clone())
     }
 }
+
+impl Default for PaheBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}

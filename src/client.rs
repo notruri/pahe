@@ -133,11 +133,10 @@ impl PaheClient {
             headers.insert(ORIGIN, v);
         }
 
-        if let Some(cookie) = &self.cookie_header {
-            if let Ok(v) = HeaderValue::from_str(cookie) {
+        if let Some(cookie) = &self.cookie_header
+            && let Ok(v) = HeaderValue::from_str(cookie) {
                 headers.insert(COOKIE, v);
             }
-        }
 
         headers
     }
