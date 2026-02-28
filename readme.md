@@ -33,31 +33,31 @@ async fn main() {
 
 #### downloading
 
-- series
+an episode
 
-    if you wish to download all the episodes from a series
+![Downloading an episode](assets/downloading.gif)
 
-    ```bash
-    pahe-cli download --series https://animepahe.si/anime/8d9c277c-d8eb-f789-6158-b853a7236f14 --quality highest --dir downloads
-    ```
+```bash
+pahe-cli download \
+    --series https://animepahe.si/anime/4a9abc55-0a54-c544-3e14-736c79ddafe7 \
+    --episodes 1
+```
 
-- specific episodes
+specific episodes
 
-    or if you prefer to download specific episodes
+![Downloading episodes](assets/batch.gif)
 
-    ```bash
-    pahe-cli download --series https://animepahe.si/anime/8d9c277c-d8eb-f789-6158-b853a7236f14 --episodes 1-12 --quality highest --dir downloads
-    ```
-
-    or if you want to only download a single episode
-
-    ```bash
-    pahe-cli download --series https://animepahe.si/anime/8d9c277c-d8eb-f789-6158-b853a7236f14 --episodes 16
-    ```
+```bash
+pahe-cli download \
+    --series https://animepahe.si/anime/4a9abc55-0a54-c544-3e14-736c79ddafe7 \
+    --episodes 2-5
+```
 
 #### interactive mode
 
 or if you don't want to manually type arguments, use interactive mode using `-i` or `--interactive` flag
+
+![Interactive mode](assets/interactive.gif)
 
 ```bash
 pahe-cli -i
