@@ -229,6 +229,14 @@ impl CliLogger {
         if self.loading_active.swap(false, Ordering::Relaxed) {
             let mut stdout = std::io::stdout();
             let _ = execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
+            if self.loading_padded.load(Ordering::Relaxed) {
+                let _ = execute!(
+                    stdout,
+                    cursor::MoveUp(1),
+                    cursor::MoveToColumn(0),
+                    Clear(ClearType::CurrentLine)
+                );
+            }
             let _ = stdout.flush();
             self.loading_padded.store(false, Ordering::Relaxed);
         }
@@ -317,6 +325,7 @@ async fn run_resolve(args: ResolveArgs) -> Result<()> {
     let logger = CliLogger::new(&args.log_level)?;
     let resolves = resolve_episode_urls(args, &logger).await?;
 
+    logger.success("Episodes has been resolved successfully");
     for (i, episode_url) in resolves.iter().enumerate() {
         logger.success(format!("episode {}: {}", i + 1, episode_url.url.yellow().to_string()));
     }
@@ -404,6 +413,7 @@ async fn resolve_episode_urls(
         info.title
             .clone()
             .unwrap_or_else(|| "unknown".to_string())
+            .trim()
             .yellow()
     ));
 
