@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  build-linux-windows:
     runs-on: ubuntu-latest
 
     steps:
@@ -30,7 +30,7 @@ jobs:
       - name: Check workspace
         run: cargo check --workspace --all-targets
 
-      - name: Build workspace (release)
+      - name: Build workspace for Linux x86_64 (release)
         run: cargo build --workspace --release
 
       - name: Build workspace for Windows (release)
@@ -42,30 +42,21 @@ jobs:
       - name: Prepare Linux ARM64 release asset name
         run: cp target/aarch64-unknown-linux-gnu/release/pahe-cli target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64
 
-      - name: Detect prerelease
-        id: prerelease
-        shell: bash
+      - name: Prepare Linux x86_64 and Windows x86_64 release asset names
         run: |
-          tag="${GITHUB_REF_NAME}"
-          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha$ ]]; then
-            echo "value=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=false" >> "$GITHUB_OUTPUT"
-          fi
+          cp target/release/pahe-cli target/release/pahe-cli-linux-x86_64
+          cp target/x86_64-pc-windows-gnu/release/pahe-cli.exe target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Linux/Windows release assets
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
-          prerelease: ${{ steps.prerelease.outputs.value }}
-          files: |
-            target/release/pahe-cli
-            target/x86_64-pc-windows-gnu/release/pahe-cli.exe
+          name: release-assets-linux-windows
+          path: |
+            target/release/pahe-cli-linux-x86_64
+            target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe
             target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64
 
   build-macos-release:
-    needs: build-and-release
     runs-on: macos-latest
 
     steps:
@@ -91,10 +82,41 @@ jobs:
           cp target/x86_64-apple-darwin/release/pahe-cli target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64
           cp target/aarch64-apple-darwin/release/pahe-cli target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64
 
-      - name: Upload macOS artifacts to release
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-macos
+          path: |
+            target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64
+            target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64
+
+  publish-release:
+    needs: [build-linux-windows, build-macos-release]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          merge-multiple: true
+          path: dist
+
+      - name: Detect prerelease
+        id: prerelease
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha$ ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: |
-            target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64
-            target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64
+          generate_release_notes: true
+          prerelease: ${{ steps.prerelease.outputs.value }}
+          files: dist/*
