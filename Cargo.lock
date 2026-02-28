@@ -1142,6 +1142,7 @@ name = "pahe-cli"
 version = "0.1.0-alpha"
 dependencies = [
  "clap",
+ "crossterm 0.29.0",
  "inquire",
  "owo-colors",
  "pahe",

@@ -1,6 +1,18 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    future::Future,
+    io::Write,
+    path::PathBuf,
+    str::FromStr,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    time::Duration,
+};
 
 use clap::{Args, Parser, Subcommand};
+use crossterm::{
+    cursor,
+    execute,
+    terminal::{Clear, ClearType},
+};
 use inquire::{Select, Text};
 use owo_colors::OwoColorize;
 use pahe::prelude::*;
@@ -108,6 +120,16 @@ impl LogLevel {
 
 struct CliLogger {
     level: LogLevel,
+    spinner_step: AtomicUsize,
+    loading_active: AtomicBool,
+    loading_padded: AtomicBool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LogState {
+    Success,
+    Failed,
+    Debug,
 }
 
 impl CliLogger {
@@ -116,35 +138,99 @@ impl CliLogger {
             "invalid log level: {level}. expected one of: error, warn, info, debug"
         )))?;
 
-        Ok(Self { level })
+        Ok(Self {
+            level,
+            spinner_step: AtomicUsize::new(0),
+            loading_active: AtomicBool::new(false),
+            loading_padded: AtomicBool::new(false),
+        })
     }
 
-    fn log(&self, level: LogLevel, message: impl AsRef<str>) {
-        let bullet = self.bullet(level);
+    fn log(&self, level: LogLevel, state: LogState, message: impl AsRef<str>) {
+        self.clear_loading_line_if_needed();
+        let icon = self.icon(state);
 
         if level <= self.level {
-            println!("\n{}{}", bullet, message.as_ref());
+            println!("{} {}", icon, message.as_ref());
         }
     }
 
-    fn info(&self, message: impl AsRef<str>) {
-        self.log(LogLevel::Info, message);
+    fn loading(&self, message: impl AsRef<str>) {
+        if LogLevel::Info > self.level {
+            return;
+        }
+
+        self.draw_loading_frame(message.as_ref());
     }
 
-    fn error(&self, message: impl AsRef<str>) {
-        self.log(LogLevel::Error, message);
+    fn success(&self, message: impl AsRef<str>) {
+        self.log(LogLevel::Info, LogState::Success, message);
+    }
+
+    fn failed(&self, message: impl AsRef<str>) {
+        self.log(LogLevel::Error, LogState::Failed, message);
     }
 
     fn debug(&self, message: impl AsRef<str>) {
-        self.log(LogLevel::Debug, message);
+        self.log(LogLevel::Debug, LogState::Debug, message);
     }
 
-    fn bullet(&self, level: LogLevel) -> Box<dyn std::fmt::Display> {
-        match level {
-            LogLevel::Info => Box::new(" * ".green()),
-            LogLevel::Error => Box::new(" * ".red()),
-            LogLevel::Warn => Box::new(" * ".yellow()),
-            LogLevel::Debug => Box::new(" * ".purple()),
+    fn icon(&self, state: LogState) -> Box<dyn std::fmt::Display> {
+        match state {
+            LogState::Success => Box::new("[✓]".green()),
+            LogState::Failed => Box::new("[✗]".red()),
+            LogState::Debug => Box::new("[λ]".purple()),
+        }
+    }
+
+    async fn while_loading<F, T>(&self, message: impl Into<String>, future: F) -> T
+    where
+        F: Future<Output = T>,
+    {
+        if LogLevel::Info > self.level {
+            return future.await;
+        }
+
+        let message = message.into();
+        let mut ticker = tokio::time::interval(Duration::from_millis(120));
+        let mut future = Box::pin(future);
+        self.loading_active.store(true, Ordering::Relaxed);
+
+        loop {
+            tokio::select! {
+                result = &mut future => {
+                    self.clear_loading_line_if_needed();
+                    return result;
+                }
+                _ = ticker.tick() => {
+                    self.draw_loading_frame(&message);
+                }
+            }
+        }
+    }
+
+    fn draw_loading_frame(&self, message: &str) {
+        const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let idx = self.spinner_step.fetch_add(1, Ordering::Relaxed);
+        let frame = FRAMES[idx % FRAMES.len()].yellow();
+        let mut stdout = std::io::stdout();
+
+        if !self.loading_padded.swap(true, Ordering::Relaxed) {
+            let _ = writeln!(stdout);
+        }
+
+        self.loading_active.store(true, Ordering::Relaxed);
+        let _ = execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
+        let _ = write!(stdout, "{} {}", frame, message);
+        let _ = stdout.flush();
+    }
+
+    fn clear_loading_line_if_needed(&self) {
+        if self.loading_active.swap(false, Ordering::Relaxed) {
+            let mut stdout = std::io::stdout();
+            let _ = execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
+            let _ = stdout.flush();
+            self.loading_padded.store(false, Ordering::Relaxed);
         }
     }
 }
@@ -210,6 +296,9 @@ async fn main() {
 
     let logger = CliLogger::new(cli.log_level()).unwrap_or(CliLogger {
         level: LogLevel::Error,
+        spinner_step: AtomicUsize::new(0),
+        loading_active: AtomicBool::new(false),
+        loading_padded: AtomicBool::new(false),
     });
 
     let result = match cli.command {
@@ -219,7 +308,7 @@ async fn main() {
     };
 
     if let Err(err) = result {
-        logger.error(format!("{err}"));
+        logger.failed(format!("{err}"));
         std::process::exit(1);
     }
 }
@@ -229,7 +318,7 @@ async fn run_resolve(args: ResolveArgs) -> Result<()> {
     let resolves = resolve_episode_urls(args, &logger).await?;
 
     for (i, episode_url) in resolves.iter().enumerate() {
-        logger.info(format!("episode {}: {}", i + 1, episode_url.url.yellow().to_string()));
+        logger.success(format!("episode {}: {}", i + 1, episode_url.url.yellow().to_string()));
     }
 
     Ok(())
@@ -244,9 +333,13 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
         let file_name: PathBuf = match &args.output {
             Some(path) => path.into(),
             None => {
-                let guessed = suggest_filename(&episode_url.referer, &episode_url.url).await.map_err(|err| {
-                    PaheError::Message(format!("failed to infer output filename: {err}"))
-                })?;
+                let guessed = logger
+                    .while_loading(
+                        "inferring output filename",
+                        suggest_filename(&episode_url.referer, &episode_url.url),
+                    )
+                    .await
+                    .map_err(|err| PaheError::Message(format!("failed to infer output filename: {err}")))?;
                 guessed.into()
             }
         };
@@ -258,18 +351,25 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
 
         let output_str = output.to_string_lossy().into_owned();
 
-        logger.info(format!(
-            "downloading with {} connection(s) to {}",
-            args.connections,
-            output_str.yellow()
-        ));
-
-        download(DownloadConfig::new(episode_url.referer, episode_url.url, output).connections(args.connections))
+        logger
+            .while_loading(
+                format!(
+                    "downloading with {} connection(s) to {}",
+                    args.connections,
+                    output_str.yellow()
+                ),
+                download(
+                    DownloadConfig::new(episode_url.referer, episode_url.url, output)
+                        .connections(args.connections),
+                ),
+            )
             .await
             .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
+
+        logger.success(format!("completed {}", output_str.yellow()));
     }
 
-    logger.info("download complete");
+    logger.success("download complete");
     Ok(())
 }
 
@@ -289,12 +389,17 @@ async fn resolve_episode_urls(
         }
     };
 
-    logger.info("initializing");
+    logger.loading("initializing");
     let pahe = PaheBuilder::new().cookies_str(&runtime.cookies).build()?;
+    logger.success("initialized");
 
-    logger.info(format!("getting info from: {}", runtime.series.yellow()));
-    let info = pahe.get_series_metadata(&runtime.series).await?;
-    logger.info(format!(
+    let info = logger
+        .while_loading(
+            format!("getting info from: {}", runtime.series.yellow()),
+            pahe.get_series_metadata(&runtime.series),
+        )
+        .await?;
+    logger.success(format!(
         "title: {}",
         info.title
             .clone()
@@ -302,9 +407,14 @@ async fn resolve_episode_urls(
             .yellow()
     ));
 
-    logger.info(format!("retrieving {} episodes", (runtime.episodes.end - runtime.episodes.start).yellow()));
-    let links = pahe
-        .fetch_series_episode_links(&info.id, runtime.episodes.start, runtime.episodes.end)
+    let links = logger
+        .while_loading(
+            format!(
+                "retrieving {} episodes",
+                (runtime.episodes.end - runtime.episodes.start).yellow()
+            ),
+            pahe.fetch_series_episode_links(&info.id, runtime.episodes.start, runtime.episodes.end),
+        )
         .await?;
 
     if links.is_empty() {
@@ -314,23 +424,33 @@ async fn resolve_episode_urls(
     let mut results = Vec::new();
 
     for (i, link) in links.iter().enumerate() {
-        logger.info(format!("processing episode {}", (i + 1).yellow()));
+        logger.loading(format!("processing episode {}", (i + 1).yellow()));
         logger.debug(format!("link: {}", link.yellow()));
 
-        let variants = pahe.fetch_episode_variants(&link).await?;
+        let variants = logger
+            .while_loading(
+                format!("fetching variants for episode {}", (i + 1).yellow()),
+                pahe.fetch_episode_variants(&link),
+            )
+            .await?;
         let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
         let quality = format!("{}p", selected.resolution);
-        let resolved = pahe.resolve_direct_link(&selected).await?;
+        let resolved = logger
+            .while_loading(
+                format!("resolving direct link for episode {}", (i + 1).yellow()),
+                pahe.resolve_direct_link(&selected),
+            )
+            .await?;
 
         results.push(EpisodeURL {
             referer: resolved.referer,
             url: resolved.direct_link,
         });
 
-        logger.info(format!("episode: {}", (i + 1).yellow()));
-        logger.info(format!("language: {}", selected.lang.yellow()));
-        logger.info(format!("quality: {}", quality.yellow()));
-        logger.info(format!("bluray: {}", selected.bluray.yellow()));
+        logger.success(format!("episode: {}", (i + 1).yellow()));
+        logger.success(format!("language: {}", selected.lang.yellow()));
+        logger.success(format!("quality: {}", quality.yellow()));
+        logger.success(format!("bluray: {}", selected.bluray.yellow()));
     }
 
     Ok(results)
