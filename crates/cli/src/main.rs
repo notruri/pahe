@@ -308,7 +308,8 @@ async fn resolve_episode_urls(
     let mut results = Vec::new();
 
     for (i, link) in links.iter().enumerate() {
-        logger.info(format!("processing episode: {}", link.yellow()));
+        logger.info(format!("processing episode {}", (i + 1).yellow()));
+        logger.debug(format!("link: {}", link.yellow()));
 
         let variants = pahe.fetch_episode_variants(&link).await?;
         let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
