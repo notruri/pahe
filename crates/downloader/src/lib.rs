@@ -22,7 +22,7 @@ impl DownloadRequest {
         Self {
             referer: referer.into(),
             url: url.into(),
-            output: output,
+            output,
             connections: 8,
         }
     }

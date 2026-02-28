@@ -208,7 +208,7 @@ async fn run_resolve(args: ResolveArgs) -> Result<()> {
         logger.success(format!(
             "episode {}: {}",
             i + 1,
-            episode_url.url.yellow().to_string()
+            episode_url.url.yellow()
         ));
     }
 
@@ -281,16 +281,23 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
 }
 
 async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<Vec<EpisodeURL>> {
-    let mut runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
-        prompt_for_args(args)?
-    } else {
-        RuntimeArgs {
-            series: args.series.expect("series checked as Some"),
-            cookies: args.cookies.expect("cookies checked as Some"),
-            episodes: args.episodes,
-            quality: args.quality,
-            lang: args.lang,
-        }
+    let mut runtime = match args {
+        args if args.interactive => prompt_for_args(args)?,
+        ResolveArgs {
+            series: Some(series),
+            cookies: Some(cookies),
+            episodes,
+            quality,
+            lang,
+            ..
+        } => RuntimeArgs {
+            series,
+            cookies,
+            episodes,
+            quality,
+            lang,
+        },
+        args => prompt_for_args(args)?,
     };
     runtime.series = normalize_series_link(&runtime.series)?;
 
@@ -336,7 +343,7 @@ async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<V
         let variants = logger
             .while_loading(
                 format!("fetching variants for episode {}", (i + 1).yellow()),
-                pahe.fetch_episode_variants(&link),
+                pahe.fetch_episode_variants(link),
             )
             .await?;
         let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
