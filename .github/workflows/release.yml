@@ -48,14 +48,18 @@ jobs:
           cp target/release/pahe-cli target/release/pahe-cli-linux-x86_64
           cp target/x86_64-pc-windows-gnu/release/pahe-cli.exe target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe
 
+      - name: Stage Linux/Windows release assets
+        run: |
+          mkdir -p release-assets
+          cp target/release/pahe-cli-linux-x86_64 release-assets/
+          cp target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe release-assets/
+          cp target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64 release-assets/
+
       - name: Upload Linux/Windows release assets
         uses: actions/upload-artifact@v4
         with:
           name: release-assets-linux-windows
-          path: |
-            target/release/pahe-cli-linux-x86_64
-            target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe
-            target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64
+          path: release-assets/*
 
   build-macos-release:
     runs-on: macos-latest
@@ -83,13 +87,17 @@ jobs:
           cp target/x86_64-apple-darwin/release/pahe-cli target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64
           cp target/aarch64-apple-darwin/release/pahe-cli target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64
 
+      - name: Stage macOS release assets
+        run: |
+          mkdir -p release-assets
+          cp target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64 release-assets/
+          cp target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64 release-assets/
+
       - name: Upload macOS release assets
         uses: actions/upload-artifact@v4
         with:
           name: release-assets-macos
-          path: |
-            target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64
-            target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64
+          path: release-assets/*
 
   publish-release:
     needs: [build-linux-windows, build-macos-release]
@@ -102,6 +110,16 @@ jobs:
           pattern: release-assets-*
           merge-multiple: true
           path: dist
+
+      - name: Verify dist contents
+        shell: bash
+        run: |
+          ls -lah dist
+          test -f dist/pahe-cli-linux-x86_64
+          test -f dist/pahe-cli-linux-aarch64
+          test -f dist/pahe-cli-windows-x86_64.exe
+          test -f dist/pahe-cli-macos-x86_64
+          test -f dist/pahe-cli-macos-aarch64
 
       - name: Detect prerelease
         id: prerelease
