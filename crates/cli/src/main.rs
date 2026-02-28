@@ -296,7 +296,7 @@ async fn resolve_episode_urls(
             .yellow()
     ));
 
-    logger.info(format!("retrieving {} episodes", runtime.episodes.yellow()));
+    logger.info(format!("retrieving {} episodes", (runtime.episodes.end - runtime.episodes.start).yellow()));
     let links = pahe
         .fetch_series_episode_links(&info.id, runtime.episodes.start, runtime.episodes.end)
         .await?;
