@@ -3,9 +3,11 @@
 </h1>
 <p align="center">A small library and CLI to interact with AnimePahe and Kwik in Rust</p>
 
-![Crates.io Version](https://img.shields.io/crates/v/pahe)
-![Crates.io License](https://img.shields.io/crates/l/:pahe)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/notruri/pahe/push.yml)
+<p align="center">
+    <img alt="Crates.io Version" src="https://img.shields.io/crates/v/pahe">
+    <img alt="Crates.io License" src="https://img.shields.io/crates/l/pahe">
+    <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/notruri/pahe/push.yml">
+</p>
 
 ## features
 
