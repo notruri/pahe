@@ -893,7 +893,7 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
 name = "pahe"
-version = "0.1.7-alpha"
+version = "0.1.7-alpha.0"
 dependencies = [
  "anyhow",
  "pahe-core",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "pahe-cli"
-version = "0.1.7-alpha"
+version = "0.1.7-alpha.0"
 dependencies = [
  "clap",
  "crossterm 0.29.0",
@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "pahe-core"
-version = "0.1.7-alpha"
+version = "0.1.7-alpha.0"
 dependencies = [
  "regex",
  "reqwest",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "pahe-downloader"
-version = "0.1.7-alpha"
+version = "0.1.7-alpha.0"
 dependencies = [
  "reqwest",
  "thiserror",

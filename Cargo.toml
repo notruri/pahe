@@ -28,7 +28,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.7-alpha"
+version = "0.1.7-alpha.0"
 edition = "2024"
 authors = ["Ruri <ruriyoshinova@proton.me>"]
 license = "AGPL-3.0"
