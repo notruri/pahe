@@ -2,14 +2,13 @@
     <img src="assets/pahe.png" alt="Pahe" height="100">
 </p>
 
-small library for AnimePahe and Kwik in Rust
+A small library and CLI to interact with AnimePahe and Kwik in Rust
 
 ## features
 
 - fetch series & episodes metadata
 - resolve kwik mirror links
-- allows downloading of episodes
-- concurrent requests when downloading
+- concurrent downloads
 
 ## usage
 
