@@ -15,6 +15,14 @@ pub struct DownloadProgressRenderer {
     downloaded: u64,
     finished: bool,
     total: Option<u64>,
+    status: DownloadStatus,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DownloadStatus {
+    Waiting,
+    Downloading,
+    Done,
 }
 
 impl DownloadProgressRenderer {
@@ -27,6 +35,7 @@ impl DownloadProgressRenderer {
             downloaded: 0,
             finished: false,
             total: None,
+            status: DownloadStatus::Waiting,
         }
     }
 
@@ -41,6 +50,7 @@ impl DownloadProgressRenderer {
                 self.downloaded = 0;
                 self.finished = false;
                 self.started_at = Some(Instant::now());
+                self.status = DownloadStatus::Waiting;
                 self.draw_current();
             }
             DownloadEvent::Progress {
@@ -52,6 +62,7 @@ impl DownloadProgressRenderer {
                 self.downloaded = downloaded_bytes;
                 self.started_at = Some(Instant::now() - elapsed);
                 self.finished = false;
+                self.status = DownloadStatus::Downloading;
                 self.draw_current();
             }
             DownloadEvent::Finished {
@@ -61,6 +72,7 @@ impl DownloadProgressRenderer {
                 self.downloaded = downloaded_bytes;
                 self.started_at = Some(Instant::now() - elapsed);
                 self.finished = true;
+                self.status = DownloadStatus::Done;
                 self.draw_current();
             }
         }
@@ -81,7 +93,13 @@ impl DownloadProgressRenderer {
         self.draw_frame(self.downloaded, self.total, elapsed, self.finished);
     }
 
-    pub fn draw_frame(&mut self, downloaded: u64, total: Option<u64>, elapsed: Duration, done: bool) {
+    pub fn draw_frame(
+        &mut self,
+        downloaded: u64,
+        total: Option<u64>,
+        elapsed: Duration,
+        done: bool,
+    ) {
         let mut stdout = std::io::stdout();
 
         if !self.initialized {
@@ -110,7 +128,7 @@ impl DownloadProgressRenderer {
             .unwrap_or(0.0)
             .clamp(0.0, 1.0);
 
-        let bar_width = 45.0;
+        let bar_width = 43.0;
         let filled = (ratio * bar_width).round();
         let empty = bar_width - filled;
         let bar = format!(
@@ -134,19 +152,47 @@ impl DownloadProgressRenderer {
         let eta_text = eta
             .map(format_duration)
             .unwrap_or_else(|| "--:--".to_string());
+        let status_text = match self.status {
+            DownloadStatus::Waiting => "waiting",
+            DownloadStatus::Downloading => "downloading",
+            DownloadStatus::Done => "done",
+        };
+
+        // Keep metrics line stable at 45 visible chars:
+        // status(11) + " " + downloaded(8) + " / " + total(8) + " " + speed(13) = 45
+        let status_cell = fit_cell(status_text, 13, false);
+        let downloaded_cell = fit_cell(&downloaded_text, 13, true);
+        let total_cell = fit_cell(&total_text, 13, false);
+        let speed_cell = fit_cell(&speed_text, 16, true);
 
         let spinner = spinner.cyan();
         let bar = bar.green();
-        let downloaded_text = downloaded_text.yellow();
-        let total_text = total_text.dimmed();
+        let status_cell = status_cell.blue();
+        let downloaded_cell = downloaded_cell.yellow();
+        let total_cell = total_cell.dimmed();
+        let speed_cell = speed_cell.cyan();
         let eta_text = eta_text.magenta();
 
         let _ = execute!(stdout, MoveUp(2), Clear(ClearType::CurrentLine));
         let _ = writeln!(stdout, "[{spinner}] {bar}  eta {eta_text}");
         let _ = writeln!(
             stdout,
-            "{downloaded_text:>14} / {total_text:<14}  {speed_text:>30}"
+            "{status_cell} {downloaded_cell} / {total_cell} {speed_cell}"
         );
         let _ = stdout.flush();
+    }
+}
+
+fn fit_cell(text: &str, width: usize, align_right: bool) -> String {
+    let clipped = if text.len() > width {
+        text[..width].to_string()
+    } else {
+        text.to_string()
+    };
+
+    if align_right {
+        format!("{clipped:>width$}")
+    } else {
+        format!("{clipped:<width$}")
     }
 }
