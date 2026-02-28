@@ -402,6 +402,7 @@ fn select_quality(
             "en" => variant.lang == "en",
             "jp" => variant.lang == "jp",
             "zh" => variant.lang == "zh",
+            "any" => true,
             _ => false,
         })
         .cloned()
