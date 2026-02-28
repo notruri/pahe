@@ -134,9 +134,10 @@ impl PaheClient {
         }
 
         if let Some(cookie) = &self.cookie_header
-            && let Ok(v) = HeaderValue::from_str(cookie) {
-                headers.insert(COOKIE, v);
-            }
+            && let Ok(v) = HeaderValue::from_str(cookie)
+        {
+            headers.insert(COOKIE, v);
+        }
 
         headers
     }

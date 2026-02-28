@@ -3,7 +3,10 @@ use std::{
     io::Write,
     path::PathBuf,
     str::FromStr,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::{
+        LazyLock,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -16,6 +19,30 @@ use inquire::{Select, Text};
 use owo_colors::OwoColorize;
 use pahe::prelude::*;
 use pahe_downloader::{DownloadEvent, DownloadRequest, download, suggest_filename};
+use regex::Regex;
+
+const ANIMEPAHE_DOMAIN: &str = "animepahe.si";
+
+static ANIME_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        format!(
+            r"^https?://(?:www\.)?{}/anime/([a-f0-9-]{{36}})(?:[/?#].*)?$",
+            regex::escape(ANIMEPAHE_DOMAIN)
+        )
+        .as_str(),
+    )
+    .expect("anime link regex must compile")
+});
+static PLAY_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        format!(
+            r"^https?://(?:www\.)?{}/play/([a-f0-9-]{{36}})/[a-f0-9]{{32,}}(?:[/?#].*)?$",
+            regex::escape(ANIMEPAHE_DOMAIN)
+        )
+        .as_str(),
+    )
+    .expect("play link regex must compile")
+});
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -37,7 +64,7 @@ enum Commands {
 
 #[derive(Debug, Clone, Args)]
 struct ResolveArgs {
-    /// AnimePahe series URL
+    /// AnimePahe anime or play URL
     #[arg(short, long)]
     series: Option<String>,
 
@@ -496,7 +523,6 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
         .await
         .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
         logger.success(format!("done {}", output_str.yellow()));
-
     }
 
     logger.success("download complete");
@@ -504,7 +530,7 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
 }
 
 async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<Vec<EpisodeURL>> {
-    let runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
+    let mut runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
         prompt_for_args(args)?
     } else {
         RuntimeArgs {
@@ -515,6 +541,7 @@ async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<V
             lang: args.lang,
         }
     };
+    runtime.series = normalize_series_link(&runtime.series)?;
 
     logger.loading("initializing");
     let pahe = PaheBuilder::new().cookies_str(&runtime.cookies).build()?;
@@ -589,7 +616,7 @@ fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
     let cookies_default = args.cookies.unwrap_or_default();
 
     let series = Text::new("Series URL:")
-        .with_placeholder("https://animepahe.ru/anime/...")
+        .with_placeholder(format!("https://{ANIMEPAHE_DOMAIN}/anime/... or /play/...").as_ref())
         .with_initial_value(&series_default)
         .prompt()
         .map_err(|err| PaheError::Message(format!("failed to read series URL: {err}")))?;
@@ -639,6 +666,26 @@ fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
         quality,
         lang,
     })
+}
+
+fn normalize_series_link(raw: &str) -> Result<String> {
+    let input = raw.trim();
+    if let Some(caps) = ANIME_LINK_RE.captures(input)
+        && let Some(anime_id) = caps.get(1).map(|m| m.as_str())
+    {
+        return Ok(format!("https://{ANIMEPAHE_DOMAIN}/anime/{anime_id}"));
+    }
+
+    if let Some(caps) = PLAY_LINK_RE.captures(input)
+        && let Some(anime_id) = caps.get(1).map(|m| m.as_str())
+    {
+        return Ok(format!("https://{ANIMEPAHE_DOMAIN}/anime/{anime_id}"));
+    }
+
+    Err(PaheError::Message(
+        "invalid --series URL: expected AnimePahe /anime/<uuid> or /play/<uuid>/<session> link"
+            .to_string(),
+    ))
 }
 
 enum QualityPreference {
@@ -755,5 +802,41 @@ fn format_bytes_f64(bytes: f64) -> String {
         format!("{:.0} {}", value, UNITS[unit])
     } else {
         format!("{value:.2} {}", UNITS[unit])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_series_link_accepts_anime_link() {
+        let input = format!("https://{ANIMEPAHE_DOMAIN}/anime/123e4567-e89b-12d3-a456-426614174000");
+        let normalized = normalize_series_link(&input).expect("anime link should be valid");
+        assert_eq!(
+            normalized,
+            format!("https://{ANIMEPAHE_DOMAIN}/anime/123e4567-e89b-12d3-a456-426614174000")
+        );
+    }
+
+    #[test]
+    fn normalize_series_link_accepts_play_link() {
+        let input = format!("https://{ANIMEPAHE_DOMAIN}/play/123e4567-e89b-12d3-a456-426614174000/3cf1e5860ff5e9f766b36241c4dd6d48de3ef45d41183ecd079e1772aeb27c3c");
+        let normalized = normalize_series_link(&input).expect("play link should be valid");
+        assert_eq!(
+            normalized,
+            format!("https://{ANIMEPAHE_DOMAIN}/anime/123e4567-e89b-12d3-a456-426614174000")
+        );
+    }
+
+    #[test]
+    fn normalize_series_link_rejects_non_animepahe_links() {
+        let err =
+            normalize_series_link("https://example.com/anime/123e4567-e89b-12d3-a456-426614174000")
+                .expect_err("non animepahe links should be rejected");
+        assert!(
+            err.to_string()
+                .contains("invalid --series URL: expected AnimePahe")
+        );
     }
 }
