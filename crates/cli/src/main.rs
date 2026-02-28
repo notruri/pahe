@@ -105,7 +105,7 @@ struct DownloadArgs {
     dir: Option<PathBuf>,
 
     /// Number of parallel connections
-    #[arg(short = 'n', long, default_value_t = 8)]
+    #[arg(short = 'n', long, default_value_t = 1)]
     connections: usize,
 
     #[command(flatten)]
