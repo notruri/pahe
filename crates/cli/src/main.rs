@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use inquire::{Select, Text};
@@ -243,14 +244,35 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
 
         let output_str = output.to_string_lossy().into_owned();
         let mut progress_renderer = DownloadProgressRenderer::new(logger.level >= LogLevel::Info);
-
-        download(
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut tick = tokio::time::interval(Duration::from_millis(80));
+        let mut download_fut = std::pin::pin!(download(
             DownloadRequest::new(episode_url.referer, episode_url.url, output)
                 .connections(args.connections),
-            |event| progress_renderer.handle(event),
-        )
-        .await
-        .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
+            move |event| {
+                let _ = events_tx.send(event);
+            },
+        ));
+
+        let download_result = loop {
+            tokio::select! {
+                result = &mut download_fut => break result,
+                maybe_event = events_rx.recv() => {
+                    if let Some(event) = maybe_event {
+                        progress_renderer.handle(event);
+                    }
+                }
+                _ = tick.tick() => {
+                    progress_renderer.tick();
+                }
+            }
+        };
+
+        while let Ok(event) = events_rx.try_recv() {
+            progress_renderer.handle(event);
+        }
+
+        download_result.map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
         logger.success(format!("done {}", output_str.yellow()));
     }
 

@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::{cursor::*, execute, style::*, terminal::*};
 use owo_colors::OwoColorize;
@@ -11,6 +11,9 @@ pub struct DownloadProgressRenderer {
     enabled: bool,
     initialized: bool,
     spinner_step: usize,
+    started_at: Option<Instant>,
+    downloaded: u64,
+    finished: bool,
     total: Option<u64>,
 }
 
@@ -20,6 +23,9 @@ impl DownloadProgressRenderer {
             enabled,
             initialized: false,
             spinner_step: 0,
+            started_at: None,
+            downloaded: 0,
+            finished: false,
             total: None,
         }
     }
@@ -32,7 +38,10 @@ impl DownloadProgressRenderer {
         match event {
             DownloadEvent::Started { total_bytes, .. } => {
                 self.total = total_bytes;
-                self.draw_frame(0, total_bytes, Duration::ZERO, false);
+                self.downloaded = 0;
+                self.finished = false;
+                self.started_at = Some(Instant::now());
+                self.draw_current();
             }
             DownloadEvent::Progress {
                 downloaded_bytes,
@@ -40,15 +49,36 @@ impl DownloadProgressRenderer {
                 elapsed,
             } => {
                 self.total = total_bytes;
-                self.draw_frame(downloaded_bytes, total_bytes, elapsed, false);
+                self.downloaded = downloaded_bytes;
+                self.started_at = Some(Instant::now() - elapsed);
+                self.finished = false;
+                self.draw_current();
             }
             DownloadEvent::Finished {
                 downloaded_bytes,
                 elapsed,
             } => {
-                self.draw_frame(downloaded_bytes, self.total, elapsed, true);
+                self.downloaded = downloaded_bytes;
+                self.started_at = Some(Instant::now() - elapsed);
+                self.finished = true;
+                self.draw_current();
             }
         }
+    }
+
+    pub fn tick(&mut self) {
+        if !self.enabled || self.finished || self.started_at.is_none() {
+            return;
+        }
+        self.draw_current();
+    }
+
+    fn draw_current(&mut self) {
+        let elapsed = self
+            .started_at
+            .map(|started| started.elapsed())
+            .unwrap_or(Duration::ZERO);
+        self.draw_frame(self.downloaded, self.total, elapsed, self.finished);
     }
 
     pub fn draw_frame(&mut self, downloaded: u64, total: Option<u64>, elapsed: Duration, done: bool) {
