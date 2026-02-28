@@ -165,6 +165,12 @@ struct EpisodeRange {
     end: i32,
 }
 
+#[derive(Debug, Clone)]
+struct EpisodeURL {
+    referer: String,
+    url: String,
+}
+
 impl FromStr for EpisodeRange {
     type Err = String;
 
@@ -222,8 +228,8 @@ async fn run_resolve(args: ResolveArgs) -> Result<()> {
     let logger = CliLogger::new(&args.log_level)?;
     let resolves = resolve_episode_urls(args, &logger).await?;
 
-    for (i, (_, url)) in resolves.iter().enumerate() {
-        logger.info(format!("episode {}: {}", i + 1, url.yellow().to_string()));
+    for (i, episode_url) in resolves.iter().enumerate() {
+        logger.info(format!("episode {}: {}", i + 1, episode_url.url.yellow().to_string()));
     }
 
     Ok(())
@@ -234,11 +240,11 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
 
     let urls = resolve_episode_urls(args.resolve, &logger).await?;
 
-    for (referer, url) in urls {
+    for episode_url in urls {
         let file_name: PathBuf = match &args.output {
             Some(path) => path.into(),
             None => {
-                let guessed = suggest_filename(&referer, &url).await.map_err(|err| {
+                let guessed = suggest_filename(&episode_url.referer, &episode_url.url).await.map_err(|err| {
                     PaheError::Message(format!("failed to infer output filename: {err}"))
                 })?;
                 guessed.into()
@@ -258,7 +264,7 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
             output_str.yellow()
         ));
 
-        download(DownloadConfig::new(referer, url, output).connections(args.connections))
+        download(DownloadConfig::new(episode_url.referer, episode_url.url, output).connections(args.connections))
             .await
             .map_err(|err| PaheError::Message(format!("download failed: {err}")))?;
     }
@@ -270,7 +276,7 @@ async fn run_download(args: DownloadArgs) -> Result<()> {
 async fn resolve_episode_urls(
     args: ResolveArgs,
     logger: &CliLogger,
-) -> Result<Vec<(String, String)>> {
+) -> Result<Vec<EpisodeURL>> {
     let runtime = if args.interactive || args.series.is_none() || args.cookies.is_none() {
         prompt_for_args(args)?
     } else {
@@ -316,7 +322,10 @@ async fn resolve_episode_urls(
         let quality = format!("{}p", selected.resolution);
         let resolved = pahe.resolve_direct_link(&selected).await?;
 
-        results.push((resolved.referer, resolved.direct_link));
+        results.push(EpisodeURL {
+            referer: resolved.referer,
+            url: resolved.direct_link,
+        });
 
         logger.info(format!("episode: {}", (i + 1).yellow()));
         logger.info(format!("language: {}", selected.lang.yellow()));
