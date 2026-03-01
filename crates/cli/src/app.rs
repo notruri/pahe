@@ -8,6 +8,7 @@ use pahe::prelude::*;
 use pahe_downloader::*;
 
 use crate::args::*;
+use crate::constants::*;
 use crate::episode::*;
 use crate::logger::*;
 use crate::progress::*;
@@ -49,6 +50,7 @@ impl App {
     }
 
     pub async fn run(&self) {
+        println!("{}", self.banner());
         if let Err(err) = match &self.cli.command {
             Some(Commands::Resolve(args)) => self.resolve(args.clone()).await,
             Some(Commands::Download(args)) => self.download(args.clone()).await,
@@ -56,6 +58,15 @@ impl App {
         } {
             self.logger.failed(format!("{err}"));
         }
+    }
+
+    fn banner(&self) -> String {
+        format!(
+            "\n{} {} {}\n",
+            "λ".cyan().bold(),
+            "pahe".purple().bold(),
+            format!("v{}", VERSION).dimmed()
+        )
     }
 
     pub async fn resolve(&self, args: ResolveArgs) -> Result<()> {

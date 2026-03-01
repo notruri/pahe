@@ -2,6 +2,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub const ANIMEPAHE_DOMAIN: &str = "animepahe.si";
 
 pub static UUID_RE: LazyLock<Regex> =
