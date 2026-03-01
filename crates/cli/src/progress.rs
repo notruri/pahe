@@ -172,7 +172,7 @@ impl DownloadProgressRenderer {
         let eta_text = eta_text.magenta();
 
         let _ = execute!(stdout, MoveUp(3), Clear(ClearType::FromCursorDown));
-        let _ = writeln!(stdout, "");
+        let _ = writeln!(stdout);
         let _ = writeln!(stdout, "{spinner} {bar}  eta {eta_text}");
         let _ = writeln!(
             stdout,
