@@ -133,7 +133,7 @@ impl CliLogger {
     fn draw_loading_frame(&self, message: &str) {
         const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let idx = self.spinner_step.fetch_add(1, Ordering::Relaxed);
-        let frame = format!("{}", FRAMES[idx % FRAMES.len()]);
+        let frame = FRAMES[idx % FRAMES.len()].to_string();
         let frame = frame.yellow();
 
         let mut stdout = std::io::stdout();
