@@ -47,7 +47,7 @@ enum LogState {
 impl CliLogger {
     pub fn new(level: &str) -> Self {
         Self::new_(level).unwrap_or(CliLogger {
-            level: LogLevel::Error,
+            level: LogLevel::Info,
             spinner_step: AtomicUsize::new(0),
             loading_active: AtomicBool::new(false),
             loading_padded: AtomicBool::new(false),

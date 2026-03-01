@@ -26,7 +26,7 @@ pub async fn resolve_episode_urls(
     logger: &CliLogger,
 ) -> Result<Vec<EpisodeURL>> {
     let mut runtime = match args {
-        args if args.interactive => prompt_for_args(args)?,
+        args if args.app_args.interactive => prompt_for_args(args)?,
         ResolveArgs {
             series: Some(series),
             cookies: Some(cookies),

@@ -17,9 +17,9 @@ use crate::progress::*;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
-
+    
     #[command(flatten)]
-    pub resolve: ResolveArgs,
+    pub download_args: DownloadArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -40,9 +40,9 @@ impl App {
     pub fn new() -> Self {
         let cli = Cli::parse();
         let log_level = match &cli.command {
-            Some(Commands::Resolve(args)) => &args.log_level,
-            Some(Commands::Download(args)) => &args.resolve.log_level,
-            None => &cli.resolve.log_level,
+            Some(Commands::Resolve(args)) => &args.app_args.log_level,
+            Some(Commands::Download(args)) => &args.resolve.app_args.log_level,
+            None => &cli.download_args.resolve.app_args.log_level,
         };
         let logger = CliLogger::new(log_level);
         Self { cli, logger }
@@ -52,7 +52,7 @@ impl App {
         if let Err(err) = match &self.cli.command {
             Some(Commands::Resolve(args)) => self.resolve(args.clone()).await,
             Some(Commands::Download(args)) => self.download(args.clone()).await,
-            None => self.resolve(self.cli.resolve.clone()).await,
+            None => self.download(self.cli.download_args.clone()).await,
         } {
             self.logger.failed(format!("{err}"));
         }
@@ -62,7 +62,7 @@ impl App {
         let logger = &self.logger;
         let resolves = resolve_episode_urls(args, logger).await?;
 
-        logger.success("Episodes has been resolved successfully");
+        logger.success("episodes has been resolved successfully");
         for (i, episode_url) in resolves.iter().enumerate() {
             logger.success(format!("episode {}: {}", i + 1, episode_url.url.yellow()));
         }

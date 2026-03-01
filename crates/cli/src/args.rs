@@ -4,8 +4,19 @@ use std::str::FromStr;
 use clap::Args;
 
 #[derive(Debug, Clone, Args)]
+pub struct AppArgs {
+    /// Logging verbosity (error, warn, info, debug)
+    #[arg(long, default_value = "info")]
+    pub log_level: String,
+
+    /// Use interactive prompts to edit arguments before execution
+    #[arg(short, long)]
+    pub interactive: bool,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct ResolveArgs {
-    /// AnimePahe anime or play URL
+    /// AnimePahe anime/play url or uuid
     #[arg(short, long)]
     pub series: Option<String>,
 
@@ -24,22 +35,13 @@ pub struct ResolveArgs {
     /// Audio language code to select (e.g. jp, en)
     #[arg(short, long, default_value = "jp")]
     pub lang: String,
-
-    /// Logging verbosity (error, warn, info, debug)
-    #[arg(long, default_value = "info")]
-    pub log_level: String,
-
-    /// Use interactive prompts to edit arguments before execution
-    #[arg(short, long)]
-    pub interactive: bool,
+    
+    #[command(flatten)]
+    pub app_args: AppArgs,
 }
 
 #[derive(Debug, Clone, Args)]
 pub struct DownloadArgs {
-    /// Direct URL to download. If omitted, resolves from pahe using resolve args.
-    #[arg(short, long)]
-    pub url: Option<String>,
-
     /// Output path for downloaded file
     #[arg(short, long)]
     pub output: Option<String>,
