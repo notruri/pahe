@@ -4,7 +4,6 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
-use inquire::{Select, Text};
 use owo_colors::OwoColorize;
 use pahe::prelude::*;
 use pahe_downloader::{DownloadRequest, download, suggest_filename};
@@ -12,8 +11,9 @@ use regex::Regex;
 
 use crate::logger::{CliLogger, LogLevel};
 use crate::progress::DownloadProgressRenderer;
+use crate::prompt::prompt_for_args;
 
-const ANIMEPAHE_DOMAIN: &str = "animepahe.si";
+pub const ANIMEPAHE_DOMAIN: &str = "animepahe.si";
 
 static ANIME_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -58,31 +58,31 @@ pub enum Commands {
 pub struct ResolveArgs {
     /// AnimePahe anime or play URL
     #[arg(short, long)]
-    series: Option<String>,
+    pub series: Option<String>,
 
     /// Cookies used to authenticate pahe requests
     #[arg(short, long, env = "PAHE_COOKIES")]
-    cookies: Option<String>,
+    pub cookies: Option<String>,
 
     /// Episodes to fetch variants for (1-indexed)
     #[arg(short, long, default_value = "1")]
-    episodes: EpisodeRange,
+    pub episodes: EpisodeRange,
 
     /// Quality to select (e.g. 1080p, 720p, highest, lowest)
     #[arg(short, long, default_value = "highest")]
-    quality: String,
+    pub quality: String,
 
     /// Audio language code to select (e.g. jp, en)
     #[arg(short, long, default_value = "jp")]
-    lang: String,
+    pub lang: String,
 
     /// Logging verbosity (error, warn, info, debug)
     #[arg(long, default_value = "info")]
-    log_level: String,
+    pub log_level: String,
 
     /// Use interactive prompts to edit arguments before execution
     #[arg(short, long)]
-    interactive: bool,
+    pub interactive: bool,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -108,12 +108,30 @@ pub struct DownloadArgs {
 }
 
 #[derive(Debug, Clone)]
-struct RuntimeArgs {
+pub struct RuntimeArgs {
     series: String,
     cookies: String,
     episodes: EpisodeRange,
     quality: String,
     lang: String,
+}
+
+impl RuntimeArgs {
+    pub fn new(
+        series: String,
+        cookies: String,
+        episodes: EpisodeRange,
+        quality: String,
+        lang: String,
+    ) -> Self {
+        Self {
+            series,
+            cookies,
+            episodes,
+            quality,
+            lang,
+        }
+    }
 }
 
 impl Cli {
@@ -127,7 +145,7 @@ impl Cli {
 }
 
 #[derive(Debug, Clone)]
-struct EpisodeRange {
+pub struct EpisodeRange {
     start: i32,
     end: i32,
 }
@@ -360,63 +378,6 @@ async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<V
     }
 
     Ok(results)
-}
-
-fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
-    let series_default = args.series.unwrap_or_default();
-    let cookies_default = args.cookies.unwrap_or_default();
-
-    let series = Text::new("Series URL:")
-        .with_placeholder(format!("https://{ANIMEPAHE_DOMAIN}/anime/... or /play/...").as_ref())
-        .with_initial_value(&series_default)
-        .prompt()
-        .map_err(|err| PaheError::Message(format!("failed to read series URL: {err}")))?;
-
-    let cookies = Text::new("Cookies:")
-        .with_help_message("You can also set this via PAHE_COOKIES")
-        .with_initial_value(&cookies_default)
-        .prompt()
-        .map_err(|err| PaheError::Message(format!("failed to read cookies: {err}")))?;
-
-    let episode_input = Text::new("Episodes:")
-        .with_initial_value(&args.episodes.to_string())
-        .prompt()
-        .map_err(|err| PaheError::Message(format!("failed to read episode: {err}")))?;
-
-    let episodes = episode_input
-        .trim()
-        .parse::<EpisodeRange>()
-        .map_err(|_| PaheError::Message("episode must be a valid number".to_string()))?;
-
-    let quality_choices = vec!["highest", "1080p", "720p", "480p", "lowest", "custom"];
-    let quality_choice = Select::new("Preferred quality:", quality_choices)
-        .with_starting_cursor(0)
-        .prompt()
-        .map_err(|err| PaheError::Message(format!("failed to read quality: {err}")))?;
-
-    let quality = if quality_choice == "custom" {
-        Text::new("Custom quality (e.g. 900p, highest):")
-            .with_initial_value(&args.quality)
-            .prompt()
-            .map_err(|err| PaheError::Message(format!("failed to read custom quality: {err}")))?
-    } else {
-        quality_choice.to_string()
-    };
-
-    let lang_options = vec!["jp", "en", "zh", "any"];
-    let lang = Select::new("Preferred audio language:", lang_options)
-        .with_starting_cursor(0)
-        .prompt()
-        .map_err(|err| PaheError::Message(format!("failed to read language: {err}")))?
-        .to_string();
-
-    Ok(RuntimeArgs {
-        series,
-        cookies,
-        episodes,
-        quality,
-        lang,
-    })
 }
 
 fn normalize_series_link(raw: &str) -> Result<String> {

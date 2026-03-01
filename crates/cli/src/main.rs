@@ -1,6 +1,7 @@
 mod app;
 mod logger;
 mod progress;
+mod prompt;
 mod utils;
 
 use app::*;
