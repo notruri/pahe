@@ -28,7 +28,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8-alpha.0"
 edition = "2024"
 authors = ["Ruri <ruriyoshinova@proton.me>"]
 license = "AGPL-3.0"
@@ -37,9 +37,9 @@ keywords = ["pahe"]
 categories = []
 
 [workspace.dependencies]
-pahe = { version = "0.1.7-alpha", path = "." }
-pahe-core = { version = "0.1.7-alpha", path = "crates/core" }
-pahe-downloader = { version = "0.1.7-alpha", path = "crates/downloader" }
+pahe = { version = "0.1.8-alpha.0", path = "." }
+pahe-core = { version = "0.1.8-alpha.0", path = "crates/core" }
+pahe-downloader = { version = "0.1.8-alpha.0", path = "crates/downloader" }
 crossterm = "0.29"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
