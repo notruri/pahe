@@ -5,6 +5,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, ORIGIN, REFERER, USER_AGEN
 use reqwest::redirect::Policy;
 use reqwest::{Client, Response, Url};
 use std::sync::Arc;
+use tracing::{debug, info};
 
 /// resolved download information returned by kwik extraction.
 #[derive(Debug, Clone)]
@@ -24,6 +25,7 @@ pub struct KwikClient {
 impl KwikClient {
     /// creates a kwik client with shared cookie storage for get/post requests.
     pub fn new() -> Result<Self> {
+        info!("initializing kwik client");
         let jar = Arc::new(Jar::default());
 
         let client = Client::builder()
@@ -135,6 +137,7 @@ impl KwikClient {
     }
 
     fn extract_link_and_token(&self, decoded: &str) -> Result<(String, String)> {
+        debug!("extracting kwik form action and token from decoded payload");
         let form_action_re = Regex::new(r#"<form[^>]*action=[\"']([^\"']+)[\"']"#)?;
         let kwik_link_re = Regex::new(r#"\"(https?://kwik\.[^/\s\"]+/[^/\s\"]+/[^\"\s]*)\""#)?;
 
@@ -158,10 +161,12 @@ impl KwikClient {
             .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
             .ok_or(KwikError::MissingToken)?;
 
+        debug!(%link, "extracted kwik post link and token");
         Ok((link, token))
     }
 
     async fn fetch_kwik_direct(&self, kwik_link: &str, token: &str) -> Result<String> {
+        info!(%kwik_link, "posting kwik direct-link form");
         let mut req = self
             .no_redirect_client
             .post(kwik_link)
@@ -175,6 +180,7 @@ impl KwikClient {
             .form(&[("_token", token)]);
 
         if let Some(origin) = Self::origin_from_url(kwik_link) {
+            debug!(%origin, "setting kwik request origin header");
             req = req.header(ORIGIN, origin);
         }
 
@@ -202,10 +208,12 @@ impl KwikClient {
             .and_then(|h| h.to_str().ok())
             .ok_or(KwikError::MissingRedirectLocation)?;
 
+        debug!(%kwik_link, redirect_location = %location, "received direct link redirect");
         Ok(location.to_string())
     }
 
     async fn fetch_kwik_dlink(&self, kwik_link: &str, retries: u8) -> Result<String> {
+        info!(%kwik_link, retries, "resolving kwik direct link");
         if retries == 0 {
             return Err(KwikError::RetryLimitExceeded {
                 link: kwik_link.to_string(),
@@ -258,6 +266,7 @@ impl KwikClient {
         let caps = if let Some(c) = packed_re.captures(&page) {
             c
         } else {
+            debug!(%kwik_link, retries_remaining = retries - 1, "packed payload not found; retrying");
             return Box::pin(self.fetch_kwik_dlink(kwik_link, retries - 1)).await;
         };
 
@@ -274,12 +283,28 @@ impl KwikClient {
 
         let decoded = match self.decode_js_style(encoded, alphabet_key, offset, base) {
             Ok(v) => v,
-            Err(_) => return Box::pin(self.fetch_kwik_dlink(kwik_link, retries - 1)).await,
+            Err(err) => {
+                debug!(
+                    %kwik_link,
+                    retries_remaining = retries - 1,
+                    error = %err,
+                    "failed to decode packed payload; retrying"
+                );
+                return Box::pin(self.fetch_kwik_dlink(kwik_link, retries - 1)).await;
+            }
         };
 
         let (link, token) = match self.extract_link_and_token(&decoded) {
             Ok(v) => v,
-            Err(_) => return Box::pin(self.fetch_kwik_dlink(kwik_link, retries - 1)).await,
+            Err(err) => {
+                debug!(
+                    %kwik_link,
+                    retries_remaining = retries - 1,
+                    error = %err,
+                    "failed to extract post link/token; retrying"
+                );
+                return Box::pin(self.fetch_kwik_dlink(kwik_link, retries - 1)).await;
+            }
         };
 
         self.fetch_kwik_direct(&link, &token).await
@@ -287,6 +312,7 @@ impl KwikClient {
 
     /// extracts a kwik referer and final direct link from a `pahe.win` page.
     pub async fn extract_kwik_link(&self, pahe_link: &str) -> Result<DirectLink> {
+        info!(%pahe_link, "extracting kwik link from pahe page");
         let resp =
             self.client
                 .get(pahe_link)
@@ -326,8 +352,10 @@ impl KwikClient {
         )?;
 
         let kwik_link = if let Some(cap) = kwik_direct_re.captures(&body) {
+            debug!("found direct kwik link in pahe payload");
             cap.get(1).map(|m| m.as_str().to_string())
         } else if let Some(cap) = packed_re.captures(&body) {
+            debug!("found packed kwik payload in pahe page; decoding");
             let encoded = cap.get(1).map(|m| m.as_str()).unwrap_or_default();
             let alphabet_key = cap.get(2).map(|m| m.as_str()).unwrap_or_default();
             let offset = cap
@@ -350,6 +378,7 @@ impl KwikClient {
         .ok_or(KwikError::MissingKwikLink)?;
 
         let direct_link = self.fetch_kwik_dlink(&kwik_link, 5).await?;
+        info!(%pahe_link, "resolved kwik direct link");
         Ok(DirectLink {
             referer: kwik_link,
             direct_link,

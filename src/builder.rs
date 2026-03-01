@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use tracing::{debug, info};
 
 const BASE_DOMAIN: &str = "animepahe.si";
 const REDIRECTOR_DOMAIN: &str = "pahe.win";
@@ -39,7 +40,15 @@ impl PaheBuilder {
 
     /// builds a [`PaheClient`] using the configured options.
     pub fn build(&self) -> Result<PaheClient> {
+        info!(
+            base_domain = %self.base_domain,
+            redirect_domain = %self.redirect_domain,
+            has_cookie_header = self.cookies.is_some(),
+            "building PaheClient"
+        );
+
         if let Some(cookies) = &self.cookies {
+            debug!("building client with explicit clearance cookie header");
             return PaheClient::new_with_clearance_cookie(
                 self.base_domain.clone(),
                 self.redirect_domain.clone(),
@@ -47,6 +56,7 @@ impl PaheBuilder {
             );
         }
 
+        debug!("building client without explicit clearance cookie header");
         PaheClient::new(self.base_domain.clone(), self.redirect_domain.clone())
     }
 }

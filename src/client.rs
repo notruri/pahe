@@ -7,6 +7,7 @@ use reqwest::{Client as ReqwestClient, Url};
 use scraper::{Html, Selector};
 use serde::Deserialize;
 use std::sync::Arc;
+use tracing::{debug, info};
 
 use pahe_core::{DirectLink, KwikClient};
 
@@ -86,17 +87,26 @@ impl PaheClient {
         redirect_domain: String,
         cookie_header: Option<String>,
     ) -> Result<Self> {
+        info!(
+            %base_domain,
+            %redirect_domain,
+            has_cookie_header = cookie_header.is_some(),
+            "initializing pahe client"
+        );
         let jar = Arc::new(Jar::default());
         let animepahe_base = Url::parse(format!("https://{base_domain}/").as_ref())
             .map_err(|_| PaheError::AnimepaheBaseUrl)?;
 
         if let Some(ref cookie) = cookie_header {
+            let mut loaded_cookies = 0usize;
             for part in cookie.split(';') {
                 let piece = part.trim();
                 if !piece.is_empty() && piece.contains('=') {
                     jar.add_cookie_str(piece, &animepahe_base);
+                    loaded_cookies += 1;
                 }
             }
+            debug!(loaded_cookies, "loaded cookies into reqwest cookie jar");
         }
 
         let client = ReqwestClient::builder()
@@ -114,6 +124,7 @@ impl PaheClient {
     }
 
     fn headers(&self, referer: &str, is_api: bool) -> HeaderMap {
+        debug!(%referer, is_api, "building request headers");
         let mut headers = HeaderMap::new();
         headers.insert(
             ACCEPT,
@@ -144,6 +155,7 @@ impl PaheClient {
     }
 
     fn anime_id(link: &str) -> Result<String> {
+        debug!(%link, "extracting anime id from link");
         let re = Regex::new(r"anime/([a-f0-9-]{36})")?;
         let id = re
             .captures(link)
@@ -151,6 +163,7 @@ impl PaheClient {
             .ok_or_else(|| PaheError::InvalidAnimeLink {
                 link: link.to_string(),
             })?;
+        debug!(anime_id = %id, "anime id extracted");
         Ok(id)
     }
 
@@ -166,16 +179,19 @@ impl PaheClient {
         cookie_hint: bool,
     ) -> Result<reqwest::Response> {
         if response.status().is_success() {
+            debug!(%context, "received successful response");
             return Ok(response);
         }
 
         let status = response.status();
+        info!(%context, %status, "request returned non-success status");
         let body = response
             .text()
             .await
             .unwrap_or_else(|_| "<failed to read error body>".to_string());
 
         if status.as_u16() == 403 && Self::detect_ddos_guard(&body) {
+            info!(%context, "ddos-guard challenge detected");
             let hint = if cookie_hint {
                 "DDoS-Guard challenge detected even with provided cookie header. Refresh cookies from a real browser session."
             } else {
@@ -195,6 +211,7 @@ impl PaheClient {
     }
 
     pub async fn get_series_metadata(&self, series_link: &str) -> Result<Anime> {
+        info!(%series_link, "fetching series metadata");
         let id = Self::anime_id(series_link)?;
 
         let resp = self
@@ -228,11 +245,17 @@ impl PaheClient {
             title = first.text().next().map(String::from);
         };
 
+        debug!(
+            anime_id = %id,
+            title = title.as_deref().unwrap_or("<none>"),
+            "parsed series metadata"
+        );
         Ok(Anime { id, title })
     }
 
     /// returns the total number of episodes reported by animepahe for a series.
     pub async fn get_series_episode_count(&self, id: &str) -> Result<i32> {
+        info!(anime_id = %id, "fetching series episode count");
         let url = format!(
             "https://{}/api?m=release&id={id}&sort=episode_asc&page=1",
             self.base_domain
@@ -260,6 +283,7 @@ impl PaheClient {
             context: "parsing release api json".to_string(),
             source,
         })?;
+        debug!(anime_id = %id, total = parsed.total, "parsed episode count");
         Ok(parsed.total)
     }
 
@@ -274,9 +298,18 @@ impl PaheClient {
     ) -> Result<Vec<(u32, String)>> {
         let start_page = ((from_episode - 1) / 30) + 1;
         let end_page = ((to_episode - 1) / 30) + 1;
+        info!(
+            anime_id = %id,
+            from_episode,
+            to_episode,
+            start_page,
+            end_page,
+            "fetching series episode links"
+        );
         let mut links = Vec::new();
 
         for page in start_page..=end_page {
+            debug!(page, "loading release page");
             let url = format!(
                 "https://{}/api?m=release&id={id}&sort=episode_asc&page={page}",
                 self.base_domain
@@ -304,6 +337,7 @@ impl PaheClient {
                 context: format!("parsing release page {page} json"),
                 source,
             })?;
+            debug!(page, entries = parsed.data.len(), "parsed release page");
 
             let mut current_index = (start_page - 1) * 30;
 
@@ -325,11 +359,17 @@ impl PaheClient {
             }
         }
 
+        info!(
+            anime_id = %id,
+            fetched_links = links.len(),
+            "finished fetching series episode links"
+        );
         Ok(links)
     }
 
     /// parses all available mirrors/qualities from a play page.
     pub async fn fetch_episode_variants(&self, play_link: &str) -> Result<Vec<EpisodeVariant>> {
+        info!(%play_link, "fetching episode variants");
         let resp = self
             .client
             .get(play_link)
@@ -412,16 +452,28 @@ impl PaheClient {
                 lang,
                 bluray,
             });
+            if let Some(last) = variants.last() {
+                debug!(
+                    dpahe_link = %last.dpahe_link,
+                    resolution = last.resolution,
+                    lang = %last.lang,
+                    bluray = last.bluray,
+                    "parsed variant"
+                );
+            }
         }
 
         if variants.is_empty() {
+            info!(%play_link, "no variants found on play page");
             return Err(PaheError::NoMirrors);
         }
 
+        info!(%play_link, variant_count = variants.len(), "finished parsing episode variants");
         Ok(variants)
     }
 
     pub async fn fetch_episode_index(&self, play_link: &str) -> Result<u32> {
+        info!(%play_link, "fetching episode index");
         let resp = self
             .client
             .get(play_link)
@@ -461,12 +513,16 @@ impl PaheClient {
             })
             .ok_or_else(|| PaheError::Message("failed to parse episode number".into()))?;
 
+        debug!(%play_link, episode, "parsed episode index");
         Ok(episode)
     }
 
     /// resolves a `pahe.win` variant into a final downloadable direct link.
     pub async fn resolve_direct_link(&self, variant: &EpisodeVariant) -> Result<DirectLink> {
-        Ok(self.kwik.extract_kwik_link(&variant.dpahe_link).await?)
+        info!(dpahe_link = %variant.dpahe_link, "resolving direct link via kwik");
+        let direct = self.kwik.extract_kwik_link(&variant.dpahe_link).await?;
+        debug!(referer = %direct.referer, "resolved direct link");
+        Ok(direct)
     }
 }
 
