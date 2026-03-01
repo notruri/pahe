@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -34,7 +35,7 @@ pub enum Commands {
 #[derive(Debug)]
 pub struct App {
     cli: Cli,
-    logger: CliLogger,
+    logger: Arc<CliLogger>,
 }
 
 impl App {
@@ -45,7 +46,8 @@ impl App {
             Some(Commands::Download(args)) => &args.resolve.app_args.log_level,
             None => &cli.download_args.resolve.app_args.log_level,
         };
-        let logger = CliLogger::new(log_level);
+        let logger = Arc::new(CliLogger::new(log_level));
+        init_tracing(Arc::clone(&logger));
         Self { cli, logger }
     }
 
@@ -56,7 +58,7 @@ impl App {
             Some(Commands::Download(args)) => self.download(args.clone()).await,
             None => self.download(self.cli.download_args.clone()).await,
         } {
-            self.logger.failed(format!("{err}"));
+            self.logger.as_ref().failed(format!("{err}"));
         }
     }
 
@@ -70,7 +72,7 @@ impl App {
     }
 
     pub async fn resolve(&self, args: ResolveArgs) -> Result<()> {
-        let logger = &self.logger;
+        let logger = self.logger.as_ref();
         let resolves = resolve_episode_urls(args, logger).await?;
 
         logger.success("episodes has been resolved successfully");
@@ -82,7 +84,7 @@ impl App {
     }
 
     pub async fn download(&self, args: DownloadArgs) -> Result<()> {
-        let logger = &self.logger;
+        let logger = self.logger.as_ref();
 
         let urls = resolve_episode_urls(args.resolve, logger).await?;
 

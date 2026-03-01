@@ -99,7 +99,7 @@ pub async fn resolve_episode_urls(
 
     for (n, link) in links.iter() {
         logger.loading(format!("processing episode {}", n.yellow()));
-        logger.debug(format!("link: {}", link.yellow()));
+        logger.debug("episode", format!("link: {}", link.yellow()));
 
         let variants = logger
             .while_loading(
@@ -152,12 +152,15 @@ fn select_quality(
         return Err(PaheError::NoSelectableVariant);
     }
 
-    logger.debug(format!(
-        "Selecting quality from {} variant(s) with quality={} and lang={}",
-        pool.len(),
-        quality,
-        audio_lang
-    ));
+    logger.debug(
+        "episode",
+        format!(
+            "selecting quality from {} variant(s) with quality={} and lang={}",
+            pool.len(),
+            quality,
+            audio_lang
+        ),
+    );
 
     let preference = parse_quality(quality).ok_or(PaheError::NoSelectableVariant)?;
 

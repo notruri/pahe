@@ -4,8 +4,14 @@ use owo_colors::OwoColorize;
 use std::io::Write;
 use std::{
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::{Arc, Once},
     time::Duration,
 };
+use tracing::{Event, Subscriber};
+use tracing_subscriber::field::Visit;
+use tracing_subscriber::layer::{Context, Layer};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::registry::Registry;
 
 use pahe::errors::*;
 
@@ -92,15 +98,23 @@ impl CliLogger {
         self.log(LogLevel::Error, LogState::Failed, message);
     }
 
-    pub fn debug(&self, message: impl AsRef<str>) {
-        self.log(LogLevel::Debug, LogState::Debug, message);
+    pub fn debug(&self, context: impl AsRef<str>, message: impl AsRef<str>) {
+        self.log(
+            LogLevel::Debug,
+            LogState::Debug,
+            format!(
+                "{:>15} {}",
+                context.as_ref().bold().bright_purple(),
+                message.as_ref()
+            ),
+        );
     }
 
     fn icon(&self, state: LogState) -> Box<dyn std::fmt::Display> {
         match state {
             LogState::Success => Box::new("✓".green()),
             LogState::Failed => Box::new("✗".red()),
-            LogState::Debug => Box::new("λ".purple()),
+            LogState::Debug => Box::new("λ".cyan()),
         }
     }
 
@@ -172,4 +186,74 @@ impl CliLogger {
             self.loading_padded.store(false, Ordering::Relaxed);
         }
     }
+}
+
+#[derive(Default)]
+struct EventFieldVisitor {
+    message: Option<String>,
+    extras: Vec<String>,
+}
+
+impl Visit for EventFieldVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = Some(format!("{value:?}").trim_matches('"').to_string());
+            return;
+        }
+
+        self.extras.push(format!("{}={value:?}", field.name()));
+    }
+}
+
+struct CliTracingLayer {
+    logger: Arc<CliLogger>,
+}
+
+impl<S> Layer<S> for CliTracingLayer
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let metadata = event.metadata();
+        let target = metadata.target();
+        if !(target.starts_with("pahe::") || target.starts_with("pahe_core::")) {
+            return;
+        }
+
+        let mut visitor = EventFieldVisitor::default();
+        event.record(&mut visitor);
+
+        let mut line = String::new();
+        if let Some(message) = visitor.message {
+            line.push_str(&message);
+        } else {
+            line.push_str("trace event");
+        }
+
+        if !visitor.extras.is_empty() {
+            line.push(' ');
+            line.push_str(&visitor.extras.join(" "));
+        }
+
+        match *metadata.level() {
+            _ => self.logger.debug(target, line),
+        }
+    }
+}
+
+pub fn init_tracing(logger: Arc<CliLogger>) {
+    static INIT: Once = Once::new();
+
+    INIT.call_once(|| {
+        let subscriber = Registry::default().with(CliTracingLayer {
+            logger: Arc::clone(&logger),
+        });
+
+        if let Err(err) = tracing::subscriber::set_global_default(subscriber) {
+            logger.debug(
+                "logger",
+                format!("failed to initialize tracing subscriber: {err}"),
+            );
+        }
+    });
 }
