@@ -1,9 +1,7 @@
 use inquire::*;
 use pahe::errors::*;
 
-use crate::app::EpisodeRange;
-use crate::app::ResolveArgs;
-use crate::app::RuntimeArgs;
+use crate::args::*;
 use crate::constants::*;
 
 pub fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
