@@ -235,9 +235,7 @@ where
             line.push_str(&visitor.extras.join(" "));
         }
 
-        match *metadata.level() {
-            _ => self.logger.debug(target, line),
-        }
+        self.logger.debug(target, line)
     }
 }
 
