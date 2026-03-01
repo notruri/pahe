@@ -4,9 +4,9 @@
 <p align="center">A small library and CLI to interact with AnimePahe and Kwik in Rust</p>
 
 <p align="center">
-    <img alt="Crates.io Version" src="https://img.shields.io/crates/v/pahe">
-    <img alt="Crates.io License" src="https://img.shields.io/crates/l/pahe">
-    <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/notruri/pahe/push.yml">
+    <a href="https://crates.io/crates/pahe"><img alt="Crates.io Version" src="https://img.shields.io/crates/v/pahe"></a>
+    <a href="https://crates.io/crates/pahe"><img alt="Crates.io License" src="https://img.shields.io/crates/l/pahe"></a>
+    <a href="https://github.com/notruri/pahe/actions/workflows/push.yml"><img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/notruri/pahe/push.yml"></a>
 </p>
 
 ## features
