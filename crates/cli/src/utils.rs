@@ -66,6 +66,7 @@ pub fn format_bytes_f64(bytes: f64) -> String {
     }
 }
 
+#[cfg(test)]
 pub fn normalize_series_link(raw: &str) -> Result<String> {
     Ok(normalize_series_input(raw)?.anime_link)
 }
