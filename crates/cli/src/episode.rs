@@ -80,9 +80,9 @@ pub async fn resolve_episode_urls(
             session_id,
         } => {
             let anime_id = anime_id.as_deref().unwrap_or(&info.id);
-            vec![format!(
-                "https://{ANIMEPAHE_DOMAIN}/play/{anime_id}/{session_id}"
-            )]
+            let link = format!("https://{ANIMEPAHE_DOMAIN}/play/{anime_id}/{session_id}");
+            let episode = pahe.fetch_episode_index(&link).await?;
+            vec![(episode, link)]
         }
     };
 
@@ -97,13 +97,13 @@ pub async fn resolve_episode_urls(
 
     let mut results = Vec::new();
 
-    for (i, link) in links.iter().enumerate() {
-        logger.loading(format!("processing episode {}", (i + 1).yellow()));
+    for (n, link) in links.iter() {
+        logger.loading(format!("processing episode {}", (n + 1).yellow()));
         logger.debug(format!("link: {}", link.yellow()));
 
         let variants = logger
             .while_loading(
-                format!("fetching variants for episode {}", (i + 1).yellow()),
+                format!("fetching variants for episode {}", (n + 1).yellow()),
                 pahe.fetch_episode_variants(link),
             )
             .await?;
@@ -111,7 +111,7 @@ pub async fn resolve_episode_urls(
         let quality = format!("{}p", selected.resolution);
         let resolved = logger
             .while_loading(
-                format!("resolving direct link for episode {}", (i + 1).yellow()),
+                format!("resolving direct link for episode {}", (n + 1).yellow()),
                 pahe.resolve_direct_link(&selected),
             )
             .await?;
@@ -121,7 +121,7 @@ pub async fn resolve_episode_urls(
             url: resolved.direct_link,
         });
 
-        logger.success(format!("episode: {}", (i + 1).yellow()));
+        logger.success(format!("episode: {}", (n + 1).yellow()));
         logger.success(format!("language: {}", selected.lang.yellow()));
         logger.success(format!("quality: {}", quality.yellow()));
         logger.success(format!("bluray: {}", selected.bluray.yellow()));
