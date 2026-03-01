@@ -2,6 +2,7 @@ use inquire::*;
 use pahe::errors::*;
 
 use crate::args::*;
+use crate::utils::*;
 
 pub fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
     let series_default = args.series.unwrap_or_default();
@@ -11,6 +12,7 @@ pub fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
         .with_initial_value(&series_default)
         .prompt()
         .map_err(|err| PaheError::Message(format!("failed to read series URL: {err}")))?;
+    let normalized_series = normalize_series_input(&series)?;
 
     let cookies = if let Some(cookies) = args.cookies {
         cookies
@@ -21,15 +23,24 @@ pub fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
             .map_err(|err| PaheError::Message(format!("failed to read cookies: {err}")))?
     };
 
-    let episode_input = Text::new("episodes:")
-        .with_help_message(r#"a number (e.g. 12) or a range (e.g. 1-12) or a comma separated list (e.g. 1,2,3) or a id/url to the episode"#)
-        .with_initial_value(&args.episodes.to_string())
-        .prompt()
-        .map_err(|err| PaheError::Message(format!("failed to read episode: {err}")))?;
+    let episodes = if let Some(session_id) = normalized_series.session_id {
+        EpisodeRange::Session {
+            anime_id: Some(normalized_series.anime_id),
+            session_id,
+        }
+    } else {
+        let episode_input = Text::new("episodes:")
+            .with_help_message(
+                r#"a number (e.g. 12), range (e.g. 1-12), session id, or episode play url"#,
+            )
+            .with_initial_value(&args.episodes.to_string())
+            .prompt()
+            .map_err(|err| PaheError::Message(format!("failed to read episode: {err}")))?;
 
-    let episodes = episode_input.trim().parse::<EpisodeRange>().map_err(|_| {
-        PaheError::Message("episode must be a valid number/list/range/url".to_string())
-    })?;
+        episode_input.trim().parse::<EpisodeRange>().map_err(|_| {
+            PaheError::Message("episode must be a valid number/range/session id/url".to_string())
+        })?
+    };
 
     let quality_choices = vec!["highest", "1080p", "720p", "480p", "lowest", "custom"];
     let quality_choice = Select::new("preferred quality:", quality_choices)

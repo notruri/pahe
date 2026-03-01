@@ -17,7 +17,7 @@ use crate::progress::*;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
-    
+
     #[command(flatten)]
     pub download_args: DownloadArgs,
 }
@@ -154,6 +154,27 @@ mod tests {
     }
 
     #[test]
+    fn normalize_series_link_accepts_anime_id() {
+        let input = "123e4567-e89b-12d3-a456-426614174000";
+        let normalized = normalize_series_link(input).expect("anime id should be valid");
+        assert_eq!(
+            normalized,
+            format!("https://{ANIMEPAHE_DOMAIN}/anime/123e4567-e89b-12d3-a456-426614174000")
+        );
+    }
+
+    #[test]
+    fn normalize_series_link_accepts_anime_and_session_id_pair() {
+        let input = "123e4567-e89b-12d3-a456-426614174000/3cf1e5860ff5e9f766b36241c4dd6d48de3ef45d41183ecd079e1772aeb27c3c";
+        let normalized =
+            normalize_series_link(input).expect("anime/session id pair should be valid");
+        assert_eq!(
+            normalized,
+            format!("https://{ANIMEPAHE_DOMAIN}/anime/123e4567-e89b-12d3-a456-426614174000")
+        );
+    }
+
+    #[test]
     fn normalize_series_link_accepts_play_link() {
         let input = format!(
             "https://{ANIMEPAHE_DOMAIN}/play/123e4567-e89b-12d3-a456-426614174000/3cf1e5860ff5e9f766b36241c4dd6d48de3ef45d41183ecd079e1772aeb27c3c"
@@ -172,7 +193,7 @@ mod tests {
                 .expect_err("non animepahe links should be rejected");
         assert!(
             err.to_string()
-                .contains("invalid --series URL: expected AnimePahe")
+                .contains("invalid --series value: expected anime id/url or anime+session id/url")
         );
     }
 }

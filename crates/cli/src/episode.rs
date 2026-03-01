@@ -5,6 +5,7 @@ use pahe::errors::*;
 use pahe::prelude::PaheBuilder;
 
 use crate::args::*;
+use crate::constants::*;
 use crate::logger::*;
 use crate::prompt::*;
 use crate::utils::*;
@@ -37,7 +38,14 @@ pub async fn resolve_episode_urls(
         } => RuntimeArgs::new(series, cookies, episodes, quality, lang),
         args => prompt_for_args(args)?,
     };
-    runtime.series = normalize_series_link(&runtime.series)?;
+    let normalized_series = normalize_series_input(&runtime.series)?;
+    runtime.series = normalized_series.anime_link.clone();
+    if let Some(session_id) = normalized_series.session_id {
+        runtime.episodes = EpisodeRange::Session {
+            anime_id: Some(normalized_series.anime_id),
+            session_id,
+        };
+    }
 
     logger.loading("initializing");
     let pahe = PaheBuilder::new().cookies_str(&runtime.cookies).build()?;
@@ -58,18 +66,33 @@ pub async fn resolve_episode_urls(
             .yellow()
     ));
 
-    let links = logger
-        .while_loading(
-            format!(
-                "retrieving {} episodes",
-                (runtime.episodes.end - runtime.episodes.start).yellow()
-            ),
-            pahe.fetch_series_episode_links(&info.id, runtime.episodes.start, runtime.episodes.end),
-        )
-        .await?;
+    let links = match &runtime.episodes {
+        EpisodeRange::Range { start, end } => {
+            logger
+                .while_loading(
+                    format!("retrieving {} episodes", (end - start).yellow()),
+                    pahe.fetch_series_episode_links(&info.id, *start, *end),
+                )
+                .await?
+        }
+        EpisodeRange::Session {
+            anime_id,
+            session_id,
+        } => {
+            let anime_id = anime_id.as_deref().unwrap_or(&info.id);
+            vec![format!(
+                "https://{ANIMEPAHE_DOMAIN}/play/{anime_id}/{session_id}"
+            )]
+        }
+    };
 
     if links.is_empty() {
-        return Err(PaheError::EpisodeNotFound(runtime.episodes.start));
+        return match runtime.episodes {
+            EpisodeRange::Range { start, .. } => Err(PaheError::EpisodeNotFound(start)),
+            EpisodeRange::Session { .. } => Err(PaheError::Message(
+                "episode not found for given session input".to_string(),
+            )),
+        };
     }
 
     let mut results = Vec::new();
