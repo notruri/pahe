@@ -158,14 +158,12 @@ impl DownloadProgressRenderer {
             DownloadStatus::Done => "done",
         };
 
-        // Keep metrics line stable at 45 visible chars:
-        // status(11) + " " + downloaded(8) + " / " + total(8) + " " + speed(13) = 45
         let status_cell = fit_cell(status_text, 13, false);
         let downloaded_cell = fit_cell(&downloaded_text, 13, true);
         let total_cell = fit_cell(&total_text, 13, false);
         let speed_cell = fit_cell(&speed_text, 16, true);
 
-        let spinner = spinner.cyan();
+        let spinner = format!("[{spinner}]").cyan();
         let bar = bar.green();
         let status_cell = status_cell.blue();
         let downloaded_cell = downloaded_cell.yellow();
@@ -173,8 +171,9 @@ impl DownloadProgressRenderer {
         let speed_cell = speed_cell.cyan();
         let eta_text = eta_text.magenta();
 
-        let _ = execute!(stdout, MoveUp(2), Clear(ClearType::CurrentLine));
-        let _ = writeln!(stdout, "[{spinner}] {bar}  eta {eta_text}");
+        let _ = execute!(stdout, MoveUp(3), Clear(ClearType::FromCursorDown));
+        let _ = writeln!(stdout, "");
+        let _ = writeln!(stdout, "{spinner} {bar}  eta {eta_text}");
         let _ = writeln!(
             stdout,
             "{status_cell} {downloaded_cell} / {total_cell} {speed_cell}"

@@ -1,5 +1,5 @@
 mod logger;
-mod render;
+mod progress;
 mod utils;
 
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use pahe_downloader::{DownloadRequest, download, suggest_filename};
 use regex::Regex;
 
 use crate::logger::{CliLogger, LogLevel};
-use crate::render::DownloadProgressRenderer;
+use crate::progress::DownloadProgressRenderer;
 
 const ANIMEPAHE_DOMAIN: &str = "animepahe.si";
 

@@ -123,7 +123,9 @@ impl CliLogger {
     fn draw_loading_frame(&self, message: &str) {
         const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let idx = self.spinner_step.fetch_add(1, Ordering::Relaxed);
-        let frame = FRAMES[idx % FRAMES.len()].yellow();
+        let frame = format!("[{}]", FRAMES[idx % FRAMES.len()]);
+        let frame = frame.yellow();
+
         let mut stdout = std::io::stdout();
 
         if !self.loading_padded.swap(true, Ordering::Relaxed) {
@@ -136,7 +138,7 @@ impl CliLogger {
             cursor::MoveToColumn(0),
             Clear(ClearType::CurrentLine)
         );
-        let _ = write!(stdout, "{} {}", frame, message);
+        let _ = write!(stdout, "{frame} {message}");
         let _ = stdout.flush();
     }
 

@@ -52,3 +52,4 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util", "sync"] }
 owo-colors = { version = "4" }
 inquire = { version = "0.7" }
+indicatif = { version = "0.18.4" }
