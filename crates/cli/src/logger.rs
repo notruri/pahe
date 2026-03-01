@@ -29,6 +29,7 @@ impl LogLevel {
     }
 }
 
+#[derive(Debug)]
 pub struct CliLogger {
     pub level: LogLevel,
     pub spinner_step: AtomicUsize,
@@ -44,7 +45,16 @@ enum LogState {
 }
 
 impl CliLogger {
-    pub fn new(level: &str) -> Result<Self> {
+    pub fn new(level: &str) -> Self {
+        Self::new_(level).unwrap_or(CliLogger {
+            level: LogLevel::Error,
+            spinner_step: AtomicUsize::new(0),
+            loading_active: AtomicBool::new(false),
+            loading_padded: AtomicBool::new(false),
+        })
+    }
+
+    fn new_(level: &str) -> Result<Self> {
         let level = LogLevel::parse(level).ok_or(PaheError::Message(format!(
             "invalid log level: {level}. expected one of: error, warn, info, debug"
         )))?;
