@@ -98,9 +98,9 @@ impl CliLogger {
 
     fn icon(&self, state: LogState) -> Box<dyn std::fmt::Display> {
         match state {
-            LogState::Success => Box::new("[✓]".green()),
-            LogState::Failed => Box::new("[✗]".red()),
-            LogState::Debug => Box::new("[λ]".purple()),
+            LogState::Success => Box::new("✓".green()),
+            LogState::Failed => Box::new("✗".red()),
+            LogState::Debug => Box::new("λ".purple()),
         }
     }
 
@@ -133,7 +133,7 @@ impl CliLogger {
     fn draw_loading_frame(&self, message: &str) {
         const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let idx = self.spinner_step.fetch_add(1, Ordering::Relaxed);
-        let frame = format!("[{}]", FRAMES[idx % FRAMES.len()]);
+        let frame = format!("{}", FRAMES[idx % FRAMES.len()]);
         let frame = frame.yellow();
 
         let mut stdout = std::io::stdout();

@@ -163,7 +163,7 @@ impl DownloadProgressRenderer {
         let total_cell = fit_cell(&total_text, 13, false);
         let speed_cell = fit_cell(&speed_text, 16, true);
 
-        let spinner = format!("[{spinner}]").cyan();
+        let spinner = format!("{spinner}").cyan();
         let bar = bar.green();
         let status_cell = status_cell.blue();
         let downloaded_cell = downloaded_cell.yellow();
