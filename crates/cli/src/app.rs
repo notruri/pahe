@@ -30,16 +30,6 @@ pub enum Commands {
     Download(DownloadArgs),
 }
 
-impl Cli {
-    pub fn log_level(&self) -> &str {
-        match &self.command {
-            Some(Commands::Resolve(args)) => &args.log_level,
-            Some(Commands::Download(args)) => &args.resolve.log_level,
-            None => &self.resolve.log_level,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct App {
     cli: Cli,
@@ -49,7 +39,12 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let cli = Cli::parse();
-        let logger = CliLogger::new(cli.log_level());
+        let log_level = match &cli.command {
+            Some(Commands::Resolve(args)) => &args.log_level,
+            Some(Commands::Download(args)) => &args.resolve.log_level,
+            None => &cli.resolve.log_level,
+        };
+        let logger = CliLogger::new(log_level);
         Self { cli, logger }
     }
 
