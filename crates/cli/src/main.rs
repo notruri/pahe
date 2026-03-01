@@ -1,4 +1,6 @@
 mod app;
+mod constants;
+mod episode;
 mod logger;
 mod progress;
 mod prompt;

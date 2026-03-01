@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+use pahe::errors::*;
+
+use crate::constants::*;
+
 pub fn estimate_eta(downloaded: u64, total: u64, elapsed: Duration) -> Option<Duration> {
     if downloaded == 0 || total <= downloaded || elapsed.is_zero() {
         return None;
@@ -53,4 +57,24 @@ pub fn format_bytes_f64(bytes: f64) -> String {
     } else {
         format!("{value:.2} {}", UNITS[unit])
     }
+}
+
+pub fn normalize_series_link(raw: &str) -> Result<String> {
+    let input = raw.trim();
+    if let Some(caps) = ANIME_LINK_RE.captures(input)
+        && let Some(anime_id) = caps.get(1).map(|m| m.as_str())
+    {
+        return Ok(format!("https://{ANIMEPAHE_DOMAIN}/anime/{anime_id}"));
+    }
+
+    if let Some(caps) = PLAY_LINK_RE.captures(input)
+        && let Some(anime_id) = caps.get(1).map(|m| m.as_str())
+    {
+        return Ok(format!("https://{ANIMEPAHE_DOMAIN}/anime/{anime_id}"));
+    }
+
+    Err(PaheError::Message(
+        "invalid --series URL: expected AnimePahe /anime/<uuid> or /play/<uuid>/<session> link"
+            .to_string(),
+    ))
 }

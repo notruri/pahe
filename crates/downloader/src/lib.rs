@@ -4,11 +4,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-pub use errors::{DownloaderError, Result};
+use errors::{DownloaderError, Result};
 use reqwest::{Client, StatusCode, header};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
+
 #[derive(Debug, Clone)]
 pub struct DownloadRequest {
     pub referer: String,

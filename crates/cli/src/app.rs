@@ -1,40 +1,16 @@
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use owo_colors::OwoColorize;
+
 use pahe::prelude::*;
-use pahe_downloader::{DownloadRequest, download, suggest_filename};
-use regex::Regex;
+use pahe_downloader::*;
 
-use crate::logger::{CliLogger, LogLevel};
-use crate::progress::DownloadProgressRenderer;
-use crate::prompt::prompt_for_args;
-
-pub const ANIMEPAHE_DOMAIN: &str = "animepahe.si";
-
-static ANIME_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        format!(
-            r"^https?://(?:www\.)?{}/anime/([a-f0-9-]{{36}})(?:[/?#].*)?$",
-            regex::escape(ANIMEPAHE_DOMAIN)
-        )
-        .as_str(),
-    )
-    .expect("anime link regex must compile")
-});
-static PLAY_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        format!(
-            r"^https?://(?:www\.)?{}/play/([a-f0-9-]{{36}})/[a-f0-9]{{32,}}(?:[/?#].*)?$",
-            regex::escape(ANIMEPAHE_DOMAIN)
-        )
-        .as_str(),
-    )
-    .expect("play link regex must compile")
-});
+use crate::episode::*;
+use crate::logger::*;
+use crate::progress::*;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -109,11 +85,11 @@ pub struct DownloadArgs {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeArgs {
-    series: String,
-    cookies: String,
-    episodes: EpisodeRange,
-    quality: String,
-    lang: String,
+    pub series: String,
+    pub cookies: String,
+    pub episodes: EpisodeRange,
+    pub quality: String,
+    pub lang: String,
 }
 
 impl RuntimeArgs {
@@ -146,14 +122,8 @@ impl Cli {
 
 #[derive(Debug, Clone)]
 pub struct EpisodeRange {
-    start: i32,
-    end: i32,
-}
-
-#[derive(Debug, Clone)]
-struct EpisodeURL {
-    referer: String,
-    url: String,
+    pub start: i32,
+    pub end: i32,
 }
 
 #[derive(Debug)]
@@ -291,180 +261,10 @@ impl std::fmt::Display for EpisodeRange {
     }
 }
 
-async fn resolve_episode_urls(args: ResolveArgs, logger: &CliLogger) -> Result<Vec<EpisodeURL>> {
-    let mut runtime = match args {
-        args if args.interactive => prompt_for_args(args)?,
-        ResolveArgs {
-            series: Some(series),
-            cookies: Some(cookies),
-            episodes,
-            quality,
-            lang,
-            ..
-        } => RuntimeArgs {
-            series,
-            cookies,
-            episodes,
-            quality,
-            lang,
-        },
-        args => prompt_for_args(args)?,
-    };
-    runtime.series = normalize_series_link(&runtime.series)?;
-
-    logger.loading("initializing");
-    let pahe = PaheBuilder::new().cookies_str(&runtime.cookies).build()?;
-    logger.success("initialized");
-
-    let info = logger
-        .while_loading(
-            format!("getting info from: {}", runtime.series.yellow()),
-            pahe.get_series_metadata(&runtime.series),
-        )
-        .await?;
-    logger.success(format!(
-        "title: {}",
-        info.title
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string())
-            .trim()
-            .yellow()
-    ));
-
-    let links = logger
-        .while_loading(
-            format!(
-                "retrieving {} episodes",
-                (runtime.episodes.end - runtime.episodes.start).yellow()
-            ),
-            pahe.fetch_series_episode_links(&info.id, runtime.episodes.start, runtime.episodes.end),
-        )
-        .await?;
-
-    if links.is_empty() {
-        return Err(PaheError::EpisodeNotFound(runtime.episodes.start));
-    }
-
-    let mut results = Vec::new();
-
-    for (i, link) in links.iter().enumerate() {
-        logger.loading(format!("processing episode {}", (i + 1).yellow()));
-        logger.debug(format!("link: {}", link.yellow()));
-
-        let variants = logger
-            .while_loading(
-                format!("fetching variants for episode {}", (i + 1).yellow()),
-                pahe.fetch_episode_variants(link),
-            )
-            .await?;
-        let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
-        let quality = format!("{}p", selected.resolution);
-        let resolved = logger
-            .while_loading(
-                format!("resolving direct link for episode {}", (i + 1).yellow()),
-                pahe.resolve_direct_link(&selected),
-            )
-            .await?;
-
-        results.push(EpisodeURL {
-            referer: resolved.referer,
-            url: resolved.direct_link,
-        });
-
-        logger.success(format!("episode: {}", (i + 1).yellow()));
-        logger.success(format!("language: {}", selected.lang.yellow()));
-        logger.success(format!("quality: {}", quality.yellow()));
-        logger.success(format!("bluray: {}", selected.bluray.yellow()));
-    }
-
-    Ok(results)
-}
-
-fn normalize_series_link(raw: &str) -> Result<String> {
-    let input = raw.trim();
-    if let Some(caps) = ANIME_LINK_RE.captures(input)
-        && let Some(anime_id) = caps.get(1).map(|m| m.as_str())
-    {
-        return Ok(format!("https://{ANIMEPAHE_DOMAIN}/anime/{anime_id}"));
-    }
-
-    if let Some(caps) = PLAY_LINK_RE.captures(input)
-        && let Some(anime_id) = caps.get(1).map(|m| m.as_str())
-    {
-        return Ok(format!("https://{ANIMEPAHE_DOMAIN}/anime/{anime_id}"));
-    }
-
-    Err(PaheError::Message(
-        "invalid --series URL: expected AnimePahe /anime/<uuid> or /play/<uuid>/<session> link"
-            .to_string(),
-    ))
-}
-
-enum QualityPreference {
-    Highest,
-    Lowest,
-    Exact(i32),
-}
-
-fn select_quality(
-    variants: Vec<EpisodeVariant>,
-    quality: &str,
-    audio_lang: &str,
-    logger: &CliLogger,
-) -> Result<EpisodeVariant> {
-    let pool: Vec<EpisodeVariant> = variants
-        .iter()
-        .filter(|variant| match audio_lang {
-            "en" => variant.lang == "en",
-            "jp" => variant.lang == "jp",
-            "zh" => variant.lang == "zh",
-            "any" => true,
-            _ => false,
-        })
-        .cloned()
-        .collect();
-
-    if pool.is_empty() {
-        return Err(PaheError::NoSelectableVariant);
-    }
-
-    logger.debug(format!(
-        "Selecting quality from {} variant(s) with quality={} and lang={}",
-        pool.len(),
-        quality,
-        audio_lang
-    ));
-
-    let preference = parse_quality(quality).ok_or(PaheError::NoSelectableVariant)?;
-
-    let selected = match preference {
-        QualityPreference::Highest => pool.into_iter().max_by_key(|variant| variant.resolution),
-        QualityPreference::Lowest => pool.into_iter().min_by_key(|variant| variant.resolution),
-        QualityPreference::Exact(target) => pool
-            .iter()
-            .find(|variant| variant.resolution == target)
-            .cloned()
-            .or_else(|| pool.into_iter().max_by_key(|variant| variant.resolution)),
-    };
-
-    selected.ok_or(PaheError::NoSelectableVariant)
-}
-
-fn parse_quality(raw_quality: &str) -> Option<QualityPreference> {
-    let normalized = raw_quality.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "highest" => Some(QualityPreference::Highest),
-        "lowest" => Some(QualityPreference::Lowest),
-        _ => {
-            let digits = normalized.trim_end_matches('p');
-            digits.parse::<i32>().ok().map(QualityPreference::Exact)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::constants::*;
+    use crate::utils::*;
 
     #[test]
     fn normalize_series_link_accepts_anime_link() {

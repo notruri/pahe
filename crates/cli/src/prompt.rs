@@ -1,10 +1,10 @@
 use inquire::*;
 use pahe::errors::*;
 
-use crate::app::ANIMEPAHE_DOMAIN;
 use crate::app::EpisodeRange;
 use crate::app::ResolveArgs;
 use crate::app::RuntimeArgs;
+use crate::constants::*;
 
 pub fn prompt_for_args(args: ResolveArgs) -> Result<RuntimeArgs> {
     let series_default = args.series.unwrap_or_default();
