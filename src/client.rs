@@ -50,6 +50,7 @@ struct ReleasePage {
 
 #[derive(Debug, Deserialize)]
 struct ReleaseItem {
+    episode: u32,
     session: String,
 }
 
@@ -270,7 +271,7 @@ impl PaheClient {
         id: &str,
         from_episode: i32,
         to_episode: i32,
-    ) -> Result<Vec<String>> {
+    ) -> Result<Vec<(u32, String)>> {
         let start_page = ((from_episode - 1) / 30) + 1;
         let end_page = ((to_episode - 1) / 30) + 1;
         let mut links = Vec::new();
@@ -317,9 +318,9 @@ impl PaheClient {
                     break;
                 }
 
-                links.push(format!(
-                    "https://{}/play/{id}/{}",
-                    self.base_domain, item.session
+                links.push((
+                    item.episode,
+                    format!("https://{}/play/{id}/{}", self.base_domain, item.session),
                 ));
             }
         }
@@ -418,6 +419,49 @@ impl PaheClient {
         }
 
         Ok(variants)
+    }
+
+    pub async fn fetch_episode_index(&self, play_link: &str) -> Result<u32> {
+        let resp = self
+            .client
+            .get(play_link)
+            .headers(self.headers(play_link, false))
+            .send()
+            .await
+            .map_err(|source| PaheError::Request {
+                context: format!("getting play page {play_link}"),
+                source,
+            })?;
+
+        let resp = Self::ensure_success_or_ddg(
+            resp,
+            &format!("play page {play_link}"),
+            self.cookie_header.is_some(),
+        )
+        .await?;
+
+        let text = resp
+            .text()
+            .await
+            .map_err(|source| PaheError::ResponseBody {
+                context: "reading play page body".to_string(),
+                source,
+            })?;
+
+        let episode = Html::parse_document(&text)
+            .select(&Selector::parse("button#episodeMenu").unwrap())
+            .next()
+            .and_then(|e| {
+                e.text()
+                    .collect::<String>()
+                    .split_whitespace()
+                    .last()?
+                    .parse::<u32>()
+                    .ok()
+            })
+            .ok_or_else(|| PaheError::Message("failed to parse episode number".into()))?;
+
+        Ok(episode)
     }
 
     /// resolves a `pahe.win` variant into a final downloadable direct link.
