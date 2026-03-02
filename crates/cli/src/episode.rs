@@ -14,6 +14,7 @@ use crate::utils::*;
 pub struct EpisodeURL {
     pub referer: String,
     pub url: String,
+    pub index: u32,
 }
 
 enum QualityPreference {
@@ -50,7 +51,6 @@ pub async fn resolve_episode_urls(
 
     logger.loading("initializing");
     let pahe = PaheBuilder::new().cookies_str(&runtime.cookies).build()?;
-    logger.success("initialized");
 
     let info = logger
         .while_loading(
@@ -58,14 +58,6 @@ pub async fn resolve_episode_urls(
             pahe.get_series_metadata(&runtime.series),
         )
         .await?;
-    logger.success(format!(
-        "title: {}",
-        info.title
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string())
-            .trim()
-            .yellow()
-    ));
 
     let links = match &runtime.episodes {
         EpisodeRange::Range { start, end } => {
@@ -121,6 +113,7 @@ pub async fn resolve_episode_urls(
             EpisodeURL {
                 referer: stream.referer,
                 url: stream.source,
+                index: *n as u32,
             }
         } else {
             let direct = logger
@@ -133,15 +126,34 @@ pub async fn resolve_episode_urls(
             EpisodeURL {
                 referer: direct.referer,
                 url: direct.direct_link,
+                index: *n as u32,
             }
         };
 
         results.push(resolved);
 
-        logger.success(format!("episode: {}", n.yellow()));
-        logger.success(format!("language: {}", selected.lang.yellow()));
-        logger.success(format!("quality: {}", quality.yellow()));
-        logger.success(format!("bluray: {}", selected.bluray.yellow()));
+        let info = vec![
+            (
+                "title".dimmed(),
+                info.title
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string())
+                    .trim()
+                    .to_string(),
+            ),
+            ("episode".dimmed(), n.to_string()),
+            ("language".dimmed(), selected.lang.to_string()),
+            ("quality".dimmed(), quality.to_string()),
+            ("bluray".dimmed(), selected.bluray.to_string()),
+        ];
+
+        logger.success(format!(
+            "{}",
+            info.into_iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        ));
     }
 
     Ok(results)

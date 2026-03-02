@@ -64,8 +64,8 @@ impl App {
 
     fn banner(&self) -> String {
         format!(
-            "\n{} {} {}\n",
-            "λ".cyan().bold(),
+            "\n{:>15}\n{:>6} {}\n",
+            "(๑>◡<๑)".cyan().bold(),
             "pahe".purple().bold(),
             format!("v{}", VERSION).dimmed()
         )
@@ -73,19 +73,18 @@ impl App {
 
     pub async fn resolve(&self, args: ResolveArgs) -> Result<()> {
         let logger = self.logger.as_ref();
-        let resolve_stream = args.stream;
         let resolves = resolve_episode_urls(args, logger).await?;
 
-        logger.success("episodes has been resolved successfully");
-        for (i, episode_url) in resolves.iter().enumerate() {
-            logger.success(format!("episode {}: {}", i + 1, episode_url.url.yellow()));
-            if resolve_stream {
-                logger.success(format!(
-                    "episode {} Referer: {}",
-                    i + 1,
-                    episode_url.referer.yellow()
-                ));
-            }
+        for episode in resolves.iter() {
+            logger.success(format!(
+                "{} {}: \n  {}: {}\n  {}: {}",
+                "episode".dimmed(),
+                episode.index.bold(),
+                "url".dimmed(),
+                episode.url.yellow(),
+                "referer".dimmed(),
+                episode.referer
+            ));
         }
 
         Ok(())
