@@ -1,3 +1,4 @@
+use swc_ecma_parser::error::SyntaxError;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, KwikError>;
@@ -56,9 +57,33 @@ pub enum KwikError {
     #[error("unable to extract kwik link from pahe page")]
     MissingKwikLink,
 
+    #[error("no stream")]
+    NoStreamURL,
+
     #[error("regex error: {0}")]
     Regex(#[from] regex::Error),
 
     #[error("number parse error: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
+
+    #[error("parser error")]
+    ParseError(#[from] ParserError),
+}
+
+#[derive(Debug, Error)]
+pub enum ParserError {
+    #[error("extract error: {context}")]
+    ExtractError { context: String },
+
+    #[error("decode error: {context}")]
+    DecodeError { context: String },
+
+    #[error("syntax error: {context}\n{error:?}")]
+    SyntaxError {
+        context: String,
+        error: SyntaxError,
+    },
+    
+    #[error("load error")]
+    LoadError,
 }
