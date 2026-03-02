@@ -4,6 +4,8 @@
 
 FROM rust:1-slim-trixie AS base
 
+LABEL org.opencontainers.image.source=https://github.com/notruri/pahe
+
 RUN apt-get update -y \
     && apt-get install -y \
        pkg-config libssl-dev \
@@ -36,7 +38,7 @@ COPY --from=plan /chef/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN cargo build --release
+RUN cargo build -p pahe-cli --release
 
 # ---------- runtime ------------ #
 
