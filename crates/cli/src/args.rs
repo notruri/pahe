@@ -64,6 +64,16 @@ pub struct DownloadArgs {
     pub resolve: ResolveArgs,
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct PlayArgs {
+    /// Player to use for playback
+    #[arg(short, long)]
+    pub player: String,
+    
+    #[command(flatten)]
+    pub resolve: ResolveArgs,
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeArgs {
     pub series: String,

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,6 +31,8 @@ pub enum Commands {
     Resolve(ResolveArgs),
     /// Download a file URL in parallel (wget-like)
     Download(DownloadArgs),
+    /// Play
+    Play(PlayArgs),
 }
 
 #[derive(Debug)]
@@ -44,6 +47,7 @@ impl App {
         let log_level = match &cli.command {
             Some(Commands::Resolve(args)) => &args.app_args.log_level,
             Some(Commands::Download(args)) => &args.resolve.app_args.log_level,
+            Some(Commands::Play(args)) => &args.resolve.app_args.log_level,
             None => &cli.download_args.resolve.app_args.log_level,
         };
         let logger = Arc::new(CliLogger::new(log_level));
@@ -56,6 +60,7 @@ impl App {
         if let Err(err) = match &self.cli.command {
             Some(Commands::Resolve(args)) => self.resolve(args.clone()).await,
             Some(Commands::Download(args)) => self.download(args.clone()).await,
+            Some(Commands::Play(args)) => self.play(args.clone()).await,
             None => self.download(self.cli.download_args.clone()).await,
         } {
             self.logger.as_ref().failed(format!("{err}"));
@@ -85,6 +90,58 @@ impl App {
                 "referer".dimmed(),
                 episode.referer
             ));
+        }
+
+        Ok(())
+    }
+
+    pub async fn play(&self, args: PlayArgs) -> Result<()> {
+        let logger = self.logger.as_ref();
+        let player = args.player.as_str();
+
+        let mut command = match player {
+            "mpv" => {
+                if cfg!(target_os = "windows") {
+                    Command::new("mpv.exe")
+                } else {
+                    Command::new("mpv")
+                }
+            }
+            idk => {
+                return Err(PaheError::Message(format!("unsupported player: {}", idk)));
+            }
+        };
+
+        let urls = resolve_episode_urls(args.resolve, logger).await?;
+
+        match player {
+            "mpv" => {
+                for episode_url in urls {
+                    logger.success(format!(
+                        "playing\n  {}: {}",
+                        "episode".dimmed(),
+                        episode_url.index
+                    ));
+                    logger.debug(
+                        "player",
+                        format!(
+                            "\n  {}: {}\n  {}: {}",
+                            "url".dimmed(),
+                            episode_url.url,
+                            "referer".dimmed(),
+                            episode_url.referer
+                        ),
+                    );
+
+                    let headers = format!("--http-header-fields=Referer: {}", episode_url.referer);
+                    let command = command.arg(headers).arg(episode_url.url);
+                    logger.debug("player", format!("command: {:?}", command));
+
+                    let mut child = command.spawn()?;
+                    child.wait()?;
+                }
+            }
+            _ => {}
         }
 
         Ok(())

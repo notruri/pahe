@@ -66,4 +66,7 @@ pub enum PaheError {
 
     #[error("{0}")]
     Message(String),
+
+    #[error("command error")]
+    CommandError(#[from] std::io::Error),
 }
