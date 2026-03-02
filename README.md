@@ -19,7 +19,68 @@
 
 - Linux (x86_64)
 - Windows (x86_64)
-- macOS (i cant fully verify this)
+- MacOS (ARM64 & Apple Silicon)
+- Docker
+
+## installation
+
+replace `<version>` with a tag like `v0.1.8` (or use `latest` in the URL).
+
+### linux
+
+x86_64
+
+```bash
+curl -L -o pahe-cli https://github.com/notruri/pahe/releases/latest/download/pahe-cli-linux-x86_64
+chmod +x pahe-cli
+sudo mv pahe-cli /usr/local/bin/pahe-cli
+```
+
+arm64
+
+```bash
+curl -L -o pahe-cli https://github.com/notruri/pahe/releases/latest/download/pahe-cli-linux-aarch64
+chmod +x pahe-cli
+sudo mv pahe-cli /usr/local/bin/pahe-cli
+```
+
+### macOS
+
+intel
+
+```bash
+curl -L -o pahe-cli https://github.com/notruri/pahe/releases/latest/download/pahe-cli-macos-x86_64
+chmod +x pahe-cli
+sudo mv pahe-cli /usr/local/bin/pahe-cli
+```
+
+apple silicon
+
+```bash
+curl -L -o pahe-cli https://github.com/notruri/pahe/releases/latest/download/pahe-cli-macos-aarch64
+chmod +x pahe-cli
+sudo mv pahe-cli /usr/local/bin/pahe-cli
+```
+
+### windows
+
+- download `pahe-cli-windows-x86_64.exe` from the release page.
+- rename it to `pahe-cli.exe` and add it to your `PATH` (optional).
+
+### cargo
+
+```bash
+cargo install pahe-cli
+```
+
+### docker
+
+ghcr
+
+```bash
+docker pull ghcr.io/notruri/pahe:latest
+docker run --rm ghcr.io/notruri/pahe:latest --help
+```
 
 ## usage
 
@@ -92,7 +153,7 @@ AnimePahe has a ddos-guard to prevent spamming, if ddos-guard blocks the request
 
 ### usage notes
 
-- this project is currently in alpha, and it may or may not work correctly
+- this project is currently in development, and it may or may not work correctly
 - some animepahe requests may require ddos-guard clearance cookies.
 - pass cookie headers through the builder when needed.
 - if parallel downloads aren't working (eg; stalling), try reducing the connections or set it to single connection (`-n 1`)
