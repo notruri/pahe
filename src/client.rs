@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{debug, info};
 
-use pahe_core::{DirectLink, KwikClient};
+use pahe_core::{kwik::Stream, DirectLink, KwikClient};
 
 use crate::errors::{PaheError, Result};
 
@@ -523,6 +523,16 @@ impl PaheClient {
         let direct = self.kwik.extract_kwik_link(&variant.dpahe_link).await?;
         debug!(referer = %direct.referer, "resolved direct link");
         Ok(direct)
+    }
+
+    /// resolves a `pahe.win` variant into a stream source (m3u8) and referer.
+    pub async fn resolve_stream_link(&self, variant: &EpisodeVariant) -> Result<Stream> {
+        info!(dpahe_link = %variant.dpahe_link, "resolving stream link via kwik");
+        let direct = self.kwik.extract_kwik_link(&variant.dpahe_link).await?;
+        let embed = direct.referer.replace("/f/", "/e/");
+        let stream = self.kwik.extract_kwik_stream(&embed).await?;
+        debug!(referer = %stream.referer, "resolved stream link");
+        Ok(stream)
     }
 }
 

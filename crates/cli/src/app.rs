@@ -26,7 +26,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Resolve and print a direct episode download URL
+    /// Resolve and print episode URL(s)
     Resolve(ResolveArgs),
     /// Download a file URL in parallel (wget-like)
     Download(DownloadArgs),
@@ -73,11 +73,19 @@ impl App {
 
     pub async fn resolve(&self, args: ResolveArgs) -> Result<()> {
         let logger = self.logger.as_ref();
+        let resolve_stream = args.stream;
         let resolves = resolve_episode_urls(args, logger).await?;
 
         logger.success("episodes has been resolved successfully");
         for (i, episode_url) in resolves.iter().enumerate() {
             logger.success(format!("episode {}: {}", i + 1, episode_url.url.yellow()));
+            if resolve_stream {
+                logger.success(format!(
+                    "episode {} Referer: {}",
+                    i + 1,
+                    episode_url.referer.yellow()
+                ));
+            }
         }
 
         Ok(())
@@ -85,6 +93,11 @@ impl App {
 
     pub async fn download(&self, args: DownloadArgs) -> Result<()> {
         let logger = self.logger.as_ref();
+        if args.resolve.stream {
+            return Err(PaheError::Message(
+                "--stream is only supported with the `resolve` command".to_string(),
+            ));
+        }
 
         let urls = resolve_episode_urls(args.resolve, logger).await?;
 

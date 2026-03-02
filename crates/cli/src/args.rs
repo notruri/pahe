@@ -38,6 +38,10 @@ pub struct ResolveArgs {
     #[arg(short, long, default_value = "jp")]
     pub lang: String,
 
+    /// Resolve episode to streaming source instead of direct download URL
+    #[arg(long)]
+    pub stream: bool,
+
     #[command(flatten)]
     pub app_args: AppArgs,
 }

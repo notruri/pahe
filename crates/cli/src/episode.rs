@@ -26,6 +26,7 @@ pub async fn resolve_episode_urls(
     args: ResolveArgs,
     logger: &CliLogger,
 ) -> Result<Vec<EpisodeURL>> {
+    let resolve_stream = args.stream;
     let mut runtime = match args {
         args if args.app_args.interactive => prompt_for_args(args)?,
         ResolveArgs {
@@ -109,17 +110,33 @@ pub async fn resolve_episode_urls(
             .await?;
         let selected = select_quality(variants, &runtime.quality, &runtime.lang, logger)?;
         let quality = format!("{}p", selected.resolution);
-        let resolved = logger
-            .while_loading(
-                format!("resolving direct link for episode {}", n.yellow()),
-                pahe.resolve_direct_link(&selected),
-            )
-            .await?;
+        let resolved = if resolve_stream {
+            let stream = logger
+                .while_loading(
+                    format!("resolving stream link for episode {}", n.yellow()),
+                    pahe.resolve_stream_link(&selected),
+                )
+                .await?;
 
-        results.push(EpisodeURL {
-            referer: resolved.referer,
-            url: resolved.direct_link,
-        });
+            EpisodeURL {
+                referer: stream.referer,
+                url: stream.source,
+            }
+        } else {
+            let direct = logger
+                .while_loading(
+                    format!("resolving direct link for episode {}", n.yellow()),
+                    pahe.resolve_direct_link(&selected),
+                )
+                .await?;
+
+            EpisodeURL {
+                referer: direct.referer,
+                url: direct.direct_link,
+            }
+        };
+
+        results.push(resolved);
 
         logger.success(format!("episode: {}", n.yellow()));
         logger.success(format!("language: {}", selected.lang.yellow()));
