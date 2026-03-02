@@ -24,8 +24,6 @@
 
 ## installation
 
-replace `<version>` with a tag like `v0.1.8` (or use `latest` in the URL).
-
 ### linux
 
 x86_64
