@@ -79,11 +79,8 @@ pub enum ParserError {
     DecodeError { context: String },
 
     #[error("syntax error: {context}\n{error:?}")]
-    SyntaxError {
-        context: String,
-        error: SyntaxError,
-    },
-    
+    SyntaxError { context: String, error: SyntaxError },
+
     #[error("load error")]
     LoadError,
 }

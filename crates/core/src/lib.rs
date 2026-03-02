@@ -20,6 +20,6 @@ mod test {
         let symtab: Vec<&str> = SYMTAB.split('|').collect();
         let unpacked = unpack_de(PACKED, BASE, COUNT as usize, symtab);
 
-        assert!(unpacked.len() > 0)
+        assert!(!unpacked.is_empty())
     }
 }

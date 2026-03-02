@@ -489,7 +489,7 @@ impl KwikClient {
             .ok_or(ParserError::DecodeError {
                 context: "decode embed".into(),
             })
-            .map(|v| v.clone())?;
+            .cloned()?;
 
         Ok(result)
     }
