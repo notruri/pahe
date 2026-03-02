@@ -27,11 +27,16 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Resolve and print episode URL(s)
+    /// Resolve and print episodes
+    #[clap(alias("r"))]
     Resolve(ResolveArgs),
-    /// Download a file URL in parallel (wget-like)
+
+    /// Download a series or episodes
+    #[clap(alias("d"))]
     Download(DownloadArgs),
-    /// Play
+
+    /// Play a series or episodes
+    #[clap(alias("p"))]
     Play(PlayArgs),
 }
 
