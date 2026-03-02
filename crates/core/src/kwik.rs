@@ -1,4 +1,3 @@
-use crate::errors::{KwikError, Result};
 use regex::Regex;
 use reqwest::cookie::Jar;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, ORIGIN, REFERER, USER_AGENT};
@@ -7,6 +6,9 @@ use reqwest::{Client, Response, Url};
 use std::sync::Arc;
 use tracing::{debug, info};
 
+use crate::errors::{KwikError, ParserError, Result};
+use crate::{parser, utils};
+
 /// resolved download information returned by kwik extraction.
 #[derive(Debug, Clone)]
 pub struct DirectLink {
@@ -14,6 +16,12 @@ pub struct DirectLink {
     pub referer: String,
     /// final redirected media url.
     pub direct_link: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Stream {
+    pub referer: String,
+    pub source: String,
 }
 
 pub struct KwikClient {
@@ -383,5 +391,106 @@ impl KwikClient {
             referer: kwik_link,
             direct_link,
         })
+    }
+
+    pub async fn extract_kwik_stream(&self, embed_link: impl AsRef<str>) -> Result<Stream> {
+        let embed_link = embed_link.as_ref();
+
+        // step 1: extract embed body
+        info!(%embed_link, "extracting embed");
+
+        let resp =
+            self.client
+                .get(embed_link)
+                .header(
+                    USER_AGENT,
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+                )
+                .send()
+                .await
+                .map_err(|source| KwikError::Request {
+                    context: format!("loading embed {embed_link}"),
+                    source,
+                })?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "<failed to read error body>".to_string());
+
+            return Err(KwikError::HttpStatus {
+                context: format!("embed {embed_link}"),
+                status,
+                body,
+            });
+        }
+
+        let body = resp
+            .text()
+            .await
+            .map_err(|source| KwikError::ResponseBody {
+                context: format!("reading embed body {embed_link}"),
+                source,
+            })?;
+
+        // step 2: extract packed payload
+        let packed_payload = self.extract_embed_packed(&body)?;
+        let packed = self.decode_embed_payload(&packed_payload)?;
+
+        // step 3: unpack payload
+        let unpacked = utils::unpack_de(
+            packed.payload.clone(),
+            packed.radix as u32,
+            packed.count,
+            packed.symbols.clone().unwrap(),
+        );
+
+        // step 4: parse variables and extract stream url
+        let variables = parser::parse_variables(unpacked)?;
+        let stream_url = variables
+            .iter()
+            .find(|v| v.ident == "source")
+            .map(|v| v.value.clone())
+            .ok_or_else(|| KwikError::NoStreamURL)?;
+
+        let stream = Stream {
+            referer: embed_link.into(),
+            source: stream_url,
+        };
+
+        Ok(stream)
+    }
+
+    pub fn extract_embed_packed(&self, body: impl AsRef<str>) -> Result<String> {
+        let re =
+            Regex::new(r#"(?s)<script\b[^>]*>(eval.*?)</script>"#).expect("compilation failed");
+        let cap = re.captures(body.as_ref());
+        let payload = cap
+            .and_then(|cap| cap.get(1))
+            .map(|m| m.as_str().to_string());
+
+        debug!("extracted embed payload");
+        let result = payload.ok_or(ParserError::ExtractError {
+            context: "extract embed".into(),
+        })?;
+
+        Ok(result)
+    }
+
+    pub fn decode_embed_payload(&self, payload: impl AsRef<str>) -> Result<parser::PackedCall> {
+        let result =
+            parser::parse_embed_payload(payload).map_err(|_| ParserError::DecodeError {
+                context: "failed to parse embed payload".into(),
+            })?;
+        let result = result
+            .get(1)
+            .ok_or(ParserError::DecodeError {
+                context: "decode embed".into(),
+            })
+            .map(|v| v.clone())?;
+
+        Ok(result)
     }
 }

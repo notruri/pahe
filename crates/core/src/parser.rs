@@ -1,7 +1,15 @@
+use std::path::Path;
+
+use swc_common::FileName;
+use swc_common::SourceMap;
+use swc_common::sync::Lrc;
 use swc_ecma_ast::*;
+use swc_ecma_parser::{Parser, StringInput, Syntax, lexer::Lexer};
 use swc_ecma_visit::{Visit, VisitWith};
 
-#[derive(Debug)]
+use crate::errors::*;
+
+#[derive(Debug, Clone)]
 pub struct PackedCall {
     pub payload: String,
     pub radix: usize,
@@ -9,11 +17,27 @@ pub struct PackedCall {
     pub symbols: Option<Vec<String>>,
 }
 
-pub struct Finder {
+#[derive(Debug, Clone)]
+pub struct Variable {
+    pub ident: String,
+    pub value: String,
+}
+
+pub struct PayloadFinder {
     results: Vec<PackedCall>,
 }
 
-impl Finder {
+pub struct VariableFinder {
+    results: Vec<Variable>,
+}
+
+impl PayloadFinder {
+    fn new() -> Self {
+        Self {
+            results: Vec::new(),
+        }
+    }
+
     fn parse_call(&mut self, call: &CallExpr) {
         if call.args.len() == 6 {
             if let (Some(payload_arg), Some(radix_arg), Some(count_arg), Some(sym_arg)) = (
@@ -58,7 +82,7 @@ impl Finder {
                             .value
                             .to_string_lossy()
                             .split('|')
-                            .filter_map(|s| (!s.trim().is_empty()).then_some(s.to_string()))
+                            .map(|s| s.to_string())
                             .collect(),
                     );
                 }
@@ -68,7 +92,7 @@ impl Finder {
     }
 }
 
-impl Visit for Finder {
+impl Visit for PayloadFinder {
     fn visit_call_expr(&mut self, n: &CallExpr) {
         // Step 1: match eval(...)
         if let Callee::Expr(callee_expr) = &n.callee {
@@ -88,4 +112,109 @@ impl Visit for Finder {
         // continue walking
         n.visit_children_with(self);
     }
+}
+
+impl VariableFinder {
+    pub fn new() -> Self {
+        Self {
+            results: Vec::new(),
+        }
+    }
+}
+
+impl Visit for VariableFinder {
+    // this currently only parses string declaration like
+    // const variable = "value"
+    fn visit_var_decl(&mut self, node: &VarDecl) {
+        for decl in &node.decls {
+            if let Pat::Ident(ident) = &decl.name {
+                if let Some(init) = &decl.init {
+                    if let Expr::Lit(Lit::Str(lit)) = &**init {
+                        let ident = ident.sym.to_string();
+                        let value = lit.value.to_string_lossy().to_string();
+                        self.results.push(Variable { ident, value });
+                    }
+                }
+            }
+        }
+
+        node.visit_children_with(self);
+    }
+}
+
+pub fn parse_embed_payload(payload: impl AsRef<str>) -> Result<Vec<PackedCall>> {
+    let cm: Lrc<SourceMap> = Default::default();
+    let fm = cm.new_source_file(
+        FileName::Custom("uwu.js".into()).into(),
+        payload.as_ref().to_string(),
+    );
+    let lexer = Lexer::new(
+        Syntax::Es(Default::default()),
+        Default::default(),
+        StringInput::from(&*fm),
+        None,
+    );
+    let mut parser = Parser::new_from(lexer);
+    let module = parser
+        .parse_module()
+        .map_err(|e| ParserError::SyntaxError {
+            context: "parse embed payload".into(),
+            error: e.into_kind(),
+        })?;
+
+    let mut finder = PayloadFinder::new();
+    module.visit_with(&mut finder);
+
+    Ok(finder.results)
+}
+
+pub fn parse_embed_payload_from_file(path: impl AsRef<Path>) -> Result<Vec<PackedCall>> {
+    let cm: Lrc<SourceMap> = Default::default();
+    let fm = cm
+        .load_file(path.as_ref())
+        .map_err(|_| ParserError::LoadError)?;
+    let lexer = Lexer::new(
+        Syntax::Es(Default::default()),
+        Default::default(),
+        StringInput::from(&*fm),
+        None,
+    );
+    let mut parser = Parser::new_from(lexer);
+    let module = parser
+        .parse_module()
+        .map_err(|e| ParserError::SyntaxError {
+            context: "parse embed payload from file".into(),
+            error: e.into_kind(),
+        })?;
+
+    let mut finder = PayloadFinder::new();
+    module.visit_with(&mut finder);
+
+    Ok(finder.results)
+}
+
+pub fn parse_variables(source: impl AsRef<str>) -> Result<Vec<Variable>> {
+    let cm: Lrc<SourceMap> = Default::default();
+    let fm = cm.new_source_file(
+        FileName::Custom("uwu.js".into()).into(),
+        source.as_ref().to_string(),
+    );
+    let lexer = Lexer::new(
+        Syntax::Es(Default::default()),
+        Default::default(),
+        StringInput::from(&*fm),
+        None,
+    );
+    let mut parser = Parser::new_from(lexer);
+    let module = parser
+        .parse_module()
+        .map_err(|e| ParserError::SyntaxError {
+            context: "parse embed payload from file".into(),
+            error: e.into_kind(),
+        })?;
+
+    let mut finder = VariableFinder::new();
+    module.visit_with(&mut finder);
+
+    Ok(finder.results)
 }
