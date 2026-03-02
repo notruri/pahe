@@ -114,7 +114,7 @@ pub async fn resolve_episode_urls(
             let stream = logger
                 .while_loading(
                     format!("resolving stream link for episode {}", n.yellow()),
-                    pahe.resolve_stream_link(&selected),
+                    pahe.resolve_stream(&selected),
                 )
                 .await?;
 
@@ -126,7 +126,7 @@ pub async fn resolve_episode_urls(
             let direct = logger
                 .while_loading(
                     format!("resolving direct link for episode {}", n.yellow()),
-                    pahe.resolve_direct_link(&selected),
+                    pahe.resolve_download(&selected),
                 )
                 .await?;
 

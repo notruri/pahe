@@ -56,6 +56,9 @@ pub enum KwikError {
 
     #[error("unable to extract kwik link from pahe page")]
     MissingKwikLink,
+    
+    #[error("invalid embed link")]
+    InvalidEmbedLink,
 
     #[error("no stream")]
     NoStreamURL,

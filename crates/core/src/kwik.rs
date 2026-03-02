@@ -2,12 +2,44 @@ use regex::Regex;
 use reqwest::cookie::Jar;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, ORIGIN, REFERER, USER_AGENT};
 use reqwest::redirect::Policy;
-use reqwest::{Client, Response, Url};
+use reqwest::{Client, Url};
 use std::sync::Arc;
 use tracing::{debug, info};
 
 use crate::errors::{KwikError, ParserError, Result};
 use crate::{parser, utils};
+
+const CLIENT_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
+
+#[derive(Debug, Clone)]
+pub struct PaheLink {
+    pub url: String,
+    pub file_url: String,
+}
+
+impl PaheLink {
+    pub fn new(url: impl Into<String>, file_url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            file_url: file_url.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct KwikFile {
+    pub embed: String,
+    pub downloadable: String,
+}
+
+impl KwikFile {
+    fn new(embed: impl Into<String>, downloadable: impl Into<String>) -> Self {
+        Self {
+            embed: embed.into(),
+            downloadable: downloadable.into(),
+        }
+    }
+}
 
 /// resolved download information returned by kwik extraction.
 #[derive(Debug, Clone)]
@@ -128,15 +160,6 @@ impl KwikClient {
         Ok(output)
     }
 
-    fn kwik_session_from_response(response: &Response) -> Option<String> {
-        for cookie in response.cookies() {
-            if cookie.name() == "kwik_session" {
-                return Some(cookie.value().to_string());
-            }
-        }
-        None
-    }
-
     fn origin_from_url(url: &str) -> Option<String> {
         let parsed = Url::parse(url).ok()?;
         let host = parsed.host_str()?;
@@ -220,106 +243,7 @@ impl KwikClient {
         Ok(location.to_string())
     }
 
-    async fn fetch_kwik_dlink(&self, kwik_link: &str, retries: u8) -> Result<String> {
-        info!(%kwik_link, retries, "resolving kwik direct link");
-        if retries == 0 {
-            return Err(KwikError::RetryLimitExceeded {
-                link: kwik_link.to_string(),
-            });
-        }
-
-        let resp = self
-            .client
-            .get(kwik_link)
-            .header(
-                USER_AGENT,
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-            )
-            .send()
-            .await
-            .map_err(|source| KwikError::Request {
-                context: format!("loading kwik page {kwik_link}"),
-                source,
-            })?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "<failed to read error body>".to_string());
-
-            return Err(KwikError::HttpStatus {
-                context: format!("kwik page {kwik_link}"),
-                status,
-                body,
-            });
-        }
-
-        // Keep for debugging/compatibility checks; jar shares all cookies across GET/POST clients.
-        let _kwik_session = Self::kwik_session_from_response(&resp);
-        let page = resp
-            .text()
-            .await
-            .map_err(|source| KwikError::ResponseBody {
-                context: format!("reading kwik page body {kwik_link}"),
-                source,
-            })?
-            .replace(['\n', '\r'], "");
-
-        let packed_re = Regex::new(
-            r#"\(\s*\"([^\",]*)\"\s*,\s*\d+\s*,\s*\"([^\",]*)\"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)"#,
-        )?;
-
-        let caps = if let Some(c) = packed_re.captures(&page) {
-            c
-        } else {
-            debug!(%kwik_link, retries_remaining = retries - 1, "packed payload not found; retrying");
-            return Box::pin(self.fetch_kwik_dlink(kwik_link, retries - 1)).await;
-        };
-
-        let encoded = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-        let alphabet_key = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
-        let offset = caps
-            .get(3)
-            .and_then(|m| m.as_str().parse::<i64>().ok())
-            .ok_or(KwikError::InvalidOffset)?;
-        let base = caps
-            .get(4)
-            .and_then(|m| m.as_str().parse::<usize>().ok())
-            .ok_or(KwikError::InvalidBase)?;
-
-        let decoded = match self.decode_js_style(encoded, alphabet_key, offset, base) {
-            Ok(v) => v,
-            Err(err) => {
-                debug!(
-                    %kwik_link,
-                    retries_remaining = retries - 1,
-                    error = %err,
-                    "failed to decode packed payload; retrying"
-                );
-                return Box::pin(self.fetch_kwik_dlink(kwik_link, retries - 1)).await;
-            }
-        };
-
-        let (link, token) = match self.extract_link_and_token(&decoded) {
-            Ok(v) => v,
-            Err(err) => {
-                debug!(
-                    %kwik_link,
-                    retries_remaining = retries - 1,
-                    error = %err,
-                    "failed to extract post link/token; retrying"
-                );
-                return Box::pin(self.fetch_kwik_dlink(kwik_link, retries - 1)).await;
-            }
-        };
-
-        self.fetch_kwik_direct(&link, &token).await
-    }
-
-    /// extracts a kwik referer and final direct link from a `pahe.win` page.
-    pub async fn extract_kwik_link(&self, pahe_link: &str) -> Result<DirectLink> {
+    pub async fn resolve_pahe_link(&self, pahe_link: &str) -> Result<PaheLink> {
         info!(%pahe_link, "extracting kwik link from pahe page");
         let resp =
             self.client
@@ -359,7 +283,7 @@ impl KwikClient {
             r#"\(\s*\"([^\",]*)\"\s*,\s*\d+\s*,\s*\"([^\",]*)\"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)"#,
         )?;
 
-        let kwik_link = if let Some(cap) = kwik_direct_re.captures(&body) {
+        let file_url = if let Some(cap) = kwik_direct_re.captures(&body) {
             debug!("found direct kwik link in pahe payload");
             cap.get(1).map(|m| m.as_str().to_string())
         } else if let Some(cap) = packed_re.captures(&body) {
@@ -385,12 +309,119 @@ impl KwikClient {
         }
         .ok_or(KwikError::MissingKwikLink)?;
 
-        let direct_link = self.fetch_kwik_dlink(&kwik_link, 5).await?;
-        info!(%pahe_link, "resolved kwik direct link");
-        Ok(DirectLink {
-            referer: kwik_link,
-            direct_link,
-        })
+        // let links = self.resolve_file(&file_url, 5).await?;
+        // info!(%pahe_link, "resolved kwik direct link");
+
+        Ok(PaheLink::new(pahe_link, file_url))
+    }
+
+    async fn fetch_file_body(&self, file_url: impl AsRef<str>) -> Result<String> {
+        let file_url = file_url.as_ref();
+        let resp = self
+            .client
+            .get(file_url)
+            .header(USER_AGENT, CLIENT_UA)
+            .send()
+            .await
+            .map_err(|source| KwikError::Request {
+                context: format!("get file: {file_url}"),
+                source,
+            })?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "<failed to read error body>".to_string());
+
+            return Err(KwikError::HttpStatus {
+                context: format!("read file: {file_url}"),
+                status,
+                body,
+            });
+        }
+
+        let body = resp.text().await.map_err(|source| KwikError::Request {
+            context: format!("read file: {file_url}"),
+            source,
+        })?;
+
+        Ok(body)
+    }
+
+    /// resolves file from a `file_url` into downloadable and embed links
+    pub async fn resolve_file(&self, file_url: impl AsRef<str>, retries: u8) -> Result<KwikFile> {
+        let file_url = file_url.as_ref();
+
+        debug!(%file_url, "extracting kwik links");
+
+        let url = Url::parse(file_url).expect("invalid kwik file url"); // TODO
+
+        // step 1: fetch the file body and extract the packed payload
+        let page = self.fetch_file_body(url.as_str()).await?;
+        let packed_re = Regex::new(
+            r#"\(\s*\"([^\",]*)\"\s*,\s*\d+\s*,\s*\"([^\",]*)\"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+[a-zA-Z]?\s*\)"#,
+        )?;
+
+        let caps = if let Some(c) = packed_re.captures(&page) {
+            c
+        } else {
+            debug!(%file_url, retries_remaining = retries - 1, "packed payload not found; retrying");
+            return Box::pin(self.resolve_file(file_url, retries - 1)).await;
+        };
+
+        let encoded = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let alphabet_key = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
+        let offset = caps
+            .get(3)
+            .and_then(|m| m.as_str().parse::<i64>().ok())
+            .ok_or(KwikError::InvalidOffset)?;
+        let base = caps
+            .get(4)
+            .and_then(|m| m.as_str().parse::<usize>().ok())
+            .ok_or(KwikError::InvalidBase)?;
+
+        let decoded = match self.decode_js_style(encoded, alphabet_key, offset, base) {
+            Ok(v) => v,
+            Err(err) => {
+                debug!(
+                    %file_url,
+                    retries_remaining = retries - 1,
+                    error = %err,
+                    "failed to decode packed payload; retrying"
+                );
+                return Box::pin(self.resolve_file(file_url, retries - 1)).await;
+            }
+        };
+
+        // step 2: extract the embed link from the decoded payload
+        let embed_re = Regex::new(r"/e/[A-Za-z0-9]+")?;
+        let embed_link = embed_re
+            .captures_iter(&decoded)
+            .next()
+            .and_then(|m| {
+                m.get(0).map(|m| {
+                    format!(
+                        "https://{}{}",
+                        url.host().expect("kwik file url must have a host"),
+                        m.as_str()
+                    )
+                })
+            })
+            .ok_or(KwikError::InvalidEmbedLink)?;
+        let embed_link = Url::parse(&embed_link).expect("invalid kwik embed link");
+
+        debug!(%embed_link, "resolved kwik embed link");
+
+        // step 3: extract the link and token from the decoded payload
+        //         and resolve it into a direct download link
+        let (link, token) = self.extract_link_and_token(&decoded)?;
+        let download_link = self.fetch_kwik_direct(&link, &token).await?;
+
+        debug!(%download_link, "resolved kwik download link");
+
+        Ok(KwikFile::new(embed_link, download_link))
     }
 
     pub async fn extract_kwik_stream(&self, embed_link: impl AsRef<str>) -> Result<Stream> {

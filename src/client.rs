@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{debug, info};
 
-use pahe_core::{kwik::Stream, DirectLink, KwikClient};
+use pahe_core::{DirectLink, KwikClient, kwik::Stream};
 
 use crate::errors::{PaheError, Result};
 
@@ -518,21 +518,31 @@ impl PaheClient {
     }
 
     /// resolves a `pahe.win` variant into a final downloadable direct link.
-    pub async fn resolve_direct_link(&self, variant: &EpisodeVariant) -> Result<DirectLink> {
+    pub async fn resolve_download(&self, variant: &EpisodeVariant) -> Result<DirectLink> {
         info!(dpahe_link = %variant.dpahe_link, "resolving direct link via kwik");
-        let direct = self.kwik.extract_kwik_link(&variant.dpahe_link).await?;
-        debug!(referer = %direct.referer, "resolved direct link");
-        Ok(direct)
+
+        let pahe_link = self.kwik.resolve_pahe_link(&variant.dpahe_link).await?;
+        let file = self.kwik.resolve_file(&pahe_link.file_url, 3).await?;
+
+        debug!(download = %file.downloadable, "resolved direct link");
+
+        Ok(DirectLink {
+            referer: pahe_link.url,
+            direct_link: file.downloadable,
+        })
     }
 
     /// resolves a `pahe.win` variant into a stream source (m3u8) and referer.
-    pub async fn resolve_stream_link(&self, variant: &EpisodeVariant) -> Result<Stream> {
+    pub async fn resolve_stream(&self, variant: &EpisodeVariant) -> Result<Stream> {
         info!(dpahe_link = %variant.dpahe_link, "resolving stream link via kwik");
-        let direct = self.kwik.extract_kwik_link(&variant.dpahe_link).await?;
-        let embed = direct.referer.replace("/f/", "/e/");
-        let stream = self.kwik.extract_kwik_stream(&embed).await?;
-        debug!(referer = %stream.referer, "resolved stream link");
-        Ok(stream)
+
+        let pahe_link = self.kwik.resolve_pahe_link(&variant.dpahe_link).await?;
+        let file = self.kwik.resolve_file(&pahe_link.file_url, 3).await?;
+        let stream = self.kwik.extract_kwik_stream(file.embed).await?;
+
+        debug!(referer = %stream.referer, source = %stream.source, "resolved stream link");
+
+        Ok(Stream { referer: stream.referer, source: stream.source })
     }
 }
 
