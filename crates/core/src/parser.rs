@@ -23,7 +23,7 @@ pub struct Variable {
     pub value: String,
 }
 
-pub struct PayloadFinder {
+pub struct EmbedPayloadFinder {
     results: Vec<PackedCall>,
 }
 
@@ -31,7 +31,7 @@ pub struct VariableFinder {
     results: Vec<Variable>,
 }
 
-impl PayloadFinder {
+impl EmbedPayloadFinder {
     fn new() -> Self {
         Self {
             results: Vec::new(),
@@ -92,7 +92,7 @@ impl PayloadFinder {
     }
 }
 
-impl Visit for PayloadFinder {
+impl Visit for EmbedPayloadFinder {
     fn visit_call_expr(&mut self, n: &CallExpr) {
         // Step 1: match eval(...)
         if let Callee::Expr(callee_expr) = &n.callee {
@@ -162,7 +162,7 @@ pub fn parse_embed_payload(payload: impl AsRef<str>) -> Result<Vec<PackedCall>> 
             error: e.into_kind(),
         })?;
 
-    let mut finder = PayloadFinder::new();
+    let mut finder = EmbedPayloadFinder::new();
     module.visit_with(&mut finder);
 
     Ok(finder.results)
@@ -187,7 +187,7 @@ pub fn parse_embed_payload_from_file(path: impl AsRef<Path>) -> Result<Vec<Packe
             error: e.into_kind(),
         })?;
 
-    let mut finder = PayloadFinder::new();
+    let mut finder = EmbedPayloadFinder::new();
     module.visit_with(&mut finder);
 
     Ok(finder.results)
