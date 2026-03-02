@@ -1,19 +1,24 @@
 use regex::Regex;
 
 /// Unpack Dean Edwards packed JavaScript
-pub fn unpack_de(packed: &str, base: u32, count: usize, symtab: Vec<&str>) -> String {
-    let mut result = packed.to_string();
+pub fn unpack_de(
+    packed: impl AsRef<str>,
+    base: u32,
+    count: usize,
+    symtab: Vec<impl AsRef<str>>,
+) -> String {
+    let mut result = packed.as_ref().to_string();
 
     // Replace tokens from highest index down
     for i in (0..count).rev() {
-        if let Some(word) = symtab.get(i) {
-            if word.is_empty() {
+        if let Some(word) = &symtab.get(i) {
+            if word.as_ref().is_empty() {
                 continue;
             }
 
             let token = format!(r"\b{}\b", to_base(i, base));
             let re = Regex::new(&token).unwrap();
-            result = re.replace_all(&result, *word).to_string();
+            result = re.replace_all(&result, word.as_ref()).to_string();
         }
     }
 
