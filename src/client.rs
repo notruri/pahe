@@ -542,7 +542,10 @@ impl PaheClient {
 
         debug!(referer = %stream.referer, source = %stream.source, "resolved stream link");
 
-        Ok(Stream { referer: stream.referer, source: stream.source })
+        Ok(Stream {
+            referer: stream.referer,
+            source: stream.source,
+        })
     }
 }
 

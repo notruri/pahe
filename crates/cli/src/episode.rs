@@ -113,7 +113,7 @@ pub async fn resolve_episode_urls(
             EpisodeURL {
                 referer: stream.referer,
                 url: stream.source,
-                index: *n as u32,
+                index: *n,
             }
         } else {
             let direct = logger
@@ -126,7 +126,7 @@ pub async fn resolve_episode_urls(
             EpisodeURL {
                 referer: direct.referer,
                 url: direct.direct_link,
-                index: *n as u32,
+                index: *n,
             }
         };
 
@@ -147,13 +147,12 @@ pub async fn resolve_episode_urls(
             ("bluray".dimmed(), selected.bluray.to_string()),
         ];
 
-        logger.success(format!(
-            "{}",
+        logger.success(
             info.into_iter()
                 .map(|(k, v)| format!("{}: {}", k, v))
                 .collect::<Vec<_>>()
-                .join("\n  ")
-        ));
+                .join("\n  "),
+        );
     }
 
     Ok(results)
