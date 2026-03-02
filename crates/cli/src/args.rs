@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use clap::Args;
+use clap::{ArgGroup, Args};
 
 use crate::constants::*;
 
@@ -65,11 +65,27 @@ pub struct DownloadArgs {
 }
 
 #[derive(Debug, Clone, Args)]
+#[command(
+    group(
+        ArgGroup::new("player_source")
+            .args(["player", "player_bin"])
+            .required(true)
+            .multiple(false)
+    )
+)]
 pub struct PlayArgs {
-    /// Player to use for playback
+    /// player to use for playback
     #[arg(short, long)]
-    pub player: String,
-    
+    pub player: Option<String>,
+
+    /// player binary to use
+    #[arg(short = 'P', long, requires = "player_args")]
+    pub player_bin: Option<String>,
+
+    /// arguments passed to the player binary
+    #[arg(short = 'A', long = "player-arg", requires = "player_bin")]
+    pub player_args: Vec<String>,
+
     #[command(flatten)]
     pub resolve: ResolveArgs,
 }

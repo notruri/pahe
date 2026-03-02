@@ -102,51 +102,67 @@ impl App {
 
     pub async fn play(&self, args: PlayArgs) -> Result<()> {
         let logger = self.logger.as_ref();
-        let player = args.player.as_str();
+        let player = args.player.as_deref();
+        let player_bin = args.player_bin.as_deref();
 
-        let mut command = match player {
-            "mpv" => {
-                if cfg!(target_os = "windows") {
-                    Command::new("mpv.exe")
-                } else {
-                    Command::new("mpv")
+        let binary = if let Some(bin) = player_bin {
+            bin
+        } else if let Some(player) = player {
+            match player {
+                "mpv" => {
+                    if cfg!(target_os = "windows") {
+                        "mpv.exe"
+                    } else {
+                        "mpv"
+                    }
+                }
+                idk => {
+                    return Err(PaheError::Message(format!("unsupported player: {}", idk)));
                 }
             }
-            idk => {
-                return Err(PaheError::Message(format!("unsupported player: {}", idk)));
-            }
+        } else {
+            return Err(PaheError::Message("player not specified".to_string()));
         };
 
         let urls = resolve_episode_urls(args.resolve, logger).await?;
 
-        match player {
-            "mpv" => {
-                for episode_url in urls {
+        for episode_url in urls {
+            let mut command = Command::new(binary);
+
+            match player {
+                Some("mpv") => {
                     logger.success(format!(
                         "playing\n  {}: {}",
                         "episode".dimmed(),
                         episode_url.index
                     ));
-                    logger.debug(
-                        "player",
-                        format!(
-                            "\n  {}: {}\n  {}: {}",
-                            "url".dimmed(),
-                            episode_url.url,
-                            "referer".dimmed(),
+
+                    command
+                        .arg(format!(
+                            "--http-header-fields=Referer: {}",
                             episode_url.referer
-                        ),
-                    );
+                        ))
+                        .arg(&episode_url.url);
 
-                    let headers = format!("--http-header-fields=Referer: {}", episode_url.referer);
-                    let command = command.arg(headers).arg(episode_url.url);
                     logger.debug("player", format!("command: {:?}", command));
+                }
+                Some(other) => {
+                    return Err(PaheError::Message(format!("unsupported player: {}", other)));
+                }
+                None => {
+                    for arg in &args.player_args {
+                        command.arg(
+                            arg.replace("%R", episode_url.referer.as_str())
+                                .replace("%S", episode_url.url.as_str()),
+                        );
+                    }
 
-                    let mut child = command.spawn()?;
-                    child.wait()?;
+                    logger.debug("player", format!("command: {:?}", command));
                 }
             }
-            _ => {}
+
+            let mut child = command.spawn()?;
+            child.wait()?;
         }
 
         Ok(())
