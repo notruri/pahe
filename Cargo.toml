@@ -56,3 +56,7 @@ inquire = { version = "0.7" }
 indicatif = { version = "0.18.4" }
 tracing = { version= "0.1" }
 tracing-subscriber = { version = "0.3" }
+swc_common = "19.0.0"
+swc_ecma_parser = "35.0.0"
+swc_ecma_ast = "21.0.0"
+swc_ecma_visit = "21.0.0"
