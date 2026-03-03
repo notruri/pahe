@@ -12,31 +12,36 @@ permissions:
 jobs:
   binaries:
     strategy:
-      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            bin: pahe-cli
             name: pahe-cli-linux-gnu
 
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            bin: pahe-cli
             name: pahe-cli-linux-musl
 
           - os: ubuntu-latest
             target: x86_64-pc-windows-gnu
+            bin: pahe-cli.exe
             name: pahe-cli-windows-gnu.exe
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            bin: pahe-cli.exe
             name: pahe-cli-windows-msvc.exe
 
           - os: macos-latest
             target: x86_64-apple-darwin
+            bin: pahe-cli
             name: pahe-cli-macos-x86_64
 
           - os: macos-latest
             target: aarch64-apple-darwin
+            bin: pahe-cli
             name: pahe-cli-macos-aarch64
 
     runs-on: ${{ matrix.os }}
@@ -69,7 +74,7 @@ jobs:
         shell: bash
         run: |
           mkdir dist
-          cp target/${{ matrix.target }}/release/pahe-cli dist/${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} dist/${{ matrix.name }}
 
       - name: Upload
         uses: actions/upload-artifact@v4
