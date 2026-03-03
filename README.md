@@ -7,6 +7,7 @@
     <a href="https://crates.io/crates/pahe"><img alt="Crates.io Version" src="https://img.shields.io/crates/v/pahe"></a>
     <a href="https://crates.io/crates/pahe"><img alt="Crates.io License" src="https://img.shields.io/crates/l/pahe"></a>
     <a href="https://github.com/notruri/pahe/actions/workflows/push.yml"><img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/notruri/pahe/push.yml"></a>
+    <a href="https://img.shields.io/docker/image-size/notruri/pahe"><img alt="Docker Image Size" src="https://img.shields.io/docker/image-size/notruri/pahe/latest"></a>
 </p>
 
 ## features
