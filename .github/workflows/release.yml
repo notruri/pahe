@@ -3,135 +3,97 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - "v*"
 
 permissions:
   contents: write
   packages: write
 
 jobs:
-  build-linux-windows:
-    runs-on: ubuntu-latest
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: pahe-cli-linux-gnu
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            name: pahe-cli-linux-musl
+
+          - os: ubuntu-latest
+            target: x86_64-pc-windows-gnu
+            name: pahe-cli-windows-gnu.exe
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: pahe-cli-windows-msvc.exe
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: pahe-cli-macos-x86_64
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: pahe-cli-macos-aarch64
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-gnu,x86_64-unknown-linux-musl,aarch64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
 
-      - name: Install cross toolchains
-        run: sudo apt-get update && sudo apt-get install -y mingw-w64 gcc-aarch64-linux-gnu musl-tools
+      - name: Install Linux cross toolchains
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mingw-w64
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Check workspace
+      - name: Check
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: cargo check --workspace --all-targets
 
-      - name: Build workspace for Linux x86_64 (release)
-        run: cargo build --workspace --release
+      - name: Build
+        run: cargo build --workspace --release --target ${{ matrix.target }}
 
-      - name: Build workspace for Linux x86_64 with musl (release)
-        run: cargo build --workspace --release --target x86_64-unknown-linux-musl
-
-      - name: Build workspace for Windows (release)
-        run: cargo build --workspace --release --target x86_64-pc-windows-gnu
-
-      - name: Build workspace for Linux ARM64 (release)
-        run: CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --workspace --release --target aarch64-unknown-linux-gnu
-
-      - name: Prepare Linux and Windows release asset names
-        run: |
-          cp target/release/pahe-cli target/release/pahe-cli-linux-x86_64
-          cp target/x86_64-unknown-linux-musl/release/pahe-cli target/release/pahe-cli-linux-musl-x86_64
-          cp target/aarch64-unknown-linux-gnu/release/pahe-cli target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64
-          cp target/x86_64-pc-windows-gnu/release/pahe-cli.exe target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe
-
-      - name: Stage Linux/Windows release assets
-        run: |
-          mkdir -p release-assets
-          cp target/release/pahe-cli-linux-x86_64 release-assets/
-          cp target/release/pahe-cli-linux-musl-x86_64 release-assets/
-          cp target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64 release-assets/
-          cp target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe release-assets/
-
-      - name: Upload Linux/Windows release assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-assets-linux-windows
-          path: release-assets/*
-
-  build-macos-release:
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build workspace for macOS Intel (release)
-        run: cargo build --workspace --release --target x86_64-apple-darwin
-
-      - name: Build workspace for macOS Apple Silicon (release)
-        run: cargo build --workspace --release --target aarch64-apple-darwin
-
-      - name: Prepare release asset names
-        run: |
-          cp target/x86_64-apple-darwin/release/pahe-cli target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64
-          cp target/aarch64-apple-darwin/release/pahe-cli target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64
-
-      - name: Stage macOS release assets
-        run: |
-          mkdir -p release-assets
-          cp target/x86_64-apple-darwin/release/pahe-cli-macos-x86_64 release-assets/
-          cp target/aarch64-apple-darwin/release/pahe-cli-macos-aarch64 release-assets/
-
-      - name: Upload macOS release assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-assets-macos
-          path: release-assets/*
-
-  publish-release:
-    needs: [build-linux-windows, build-macos-release]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download release assets
-        uses: actions/download-artifact@v4
-        with:
-          pattern: release-assets-*
-          merge-multiple: true
-          path: dist
-
-      - name: Verify dist contents
+      - name: Stage
         shell: bash
         run: |
-          ls -lah dist
-          test -f dist/pahe-cli-linux-x86_64
-          test -f dist/pahe-cli-linux-aarch64
-          test -f dist/pahe-cli-linux-musl-x86_64
-          test -f dist/pahe-cli-windows-x86_64.exe
-          test -f dist/pahe-cli-macos-x86_64
-          test -f dist/pahe-cli-macos-aarch64
+          mkdir dist
+          cp target/${{ matrix.target }}/release/pahe-cli dist/${{ matrix.name }}
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.name }}
+
+  release:
+    needs: binaries
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Detect prerelease
         id: prerelease
-        shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
-          if [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+          if [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+- ]]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
           else
             echo "value=false" >> "$GITHUB_OUTPUT"
@@ -145,8 +107,7 @@ jobs:
           prerelease: ${{ steps.prerelease.outputs.value }}
           files: dist/*
 
-  publish-docker:
-    needs: [build-linux-windows, build-macos-release]
+  docker:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -182,3 +143,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
