@@ -136,7 +136,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract Docker metadata
@@ -145,7 +145,7 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.repository }}
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/pahe-cli
+            docker.io/${{ vars.DOCKERHUB_USERNAME }}/pahe-cli
           tags: |
             type=ref,event=tag
             type=sha,prefix=sha-
