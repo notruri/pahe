@@ -8,9 +8,10 @@ LABEL org.opencontainers.image.source=https://github.com/notruri/pahe
 
 RUN apt-get update -y \
     && apt-get install -y \
-       pkg-config libssl-dev \
+       pkg-config libssl-dev musl-tools \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rustup target add x86_64-unknown-linux-musl
 
 # --------- preparation ----------- #
 
@@ -38,18 +39,14 @@ COPY --from=plan /chef/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN cargo build -p pahe-cli --release
+RUN cargo build --workspace --release --target x86_64-unknown-linux-musl
 
 # ---------- runtime ------------ #
 
-FROM base AS runtime
+FROM alpine:latest
 
 WORKDIR /app
 
-COPY --from=cook /kitchen/target/release/pahe-cli /app/pahe-cli
-
-# ---------- launch ------------ #
-
-FROM runtime AS launch
+COPY --from=cook /kitchen/target/x86_64-unknown-linux-musl/release/pahe-cli /app/pahe-cli
 
 ENTRYPOINT [ "./pahe-cli" ]

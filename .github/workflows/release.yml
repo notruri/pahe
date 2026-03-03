@@ -21,10 +21,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-gnu,aarch64-unknown-linux-gnu
+          targets: x86_64-pc-windows-gnu,x86_64-unknown-linux-musl,aarch64-unknown-linux-gnu
 
       - name: Install cross toolchains
-        run: sudo apt-get update && sudo apt-get install -y mingw-w64 gcc-aarch64-linux-gnu
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 gcc-aarch64-linux-gnu musl-tools
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -35,26 +35,29 @@ jobs:
       - name: Build workspace for Linux x86_64 (release)
         run: cargo build --workspace --release
 
+      - name: Build workspace for Linux x86_64 with musl (release)
+        run: cargo build --workspace --release --target x86_64-unknown-linux-musl
+
       - name: Build workspace for Windows (release)
         run: cargo build --workspace --release --target x86_64-pc-windows-gnu
 
       - name: Build workspace for Linux ARM64 (release)
         run: CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --workspace --release --target aarch64-unknown-linux-gnu
 
-      - name: Prepare Linux ARM64 release asset name
-        run: cp target/aarch64-unknown-linux-gnu/release/pahe-cli target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64
-
-      - name: Prepare Linux x86_64 and Windows x86_64 release asset names
+      - name: Prepare Linux and Windows release asset names
         run: |
           cp target/release/pahe-cli target/release/pahe-cli-linux-x86_64
+          cp target/x86_64-unknown-linux-musl/release/pahe-cli target/release/pahe-cli-linux-musl-x86_64
+          cp target/aarch64-unknown-linux-gnu/release/pahe-cli target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64
           cp target/x86_64-pc-windows-gnu/release/pahe-cli.exe target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe
 
       - name: Stage Linux/Windows release assets
         run: |
           mkdir -p release-assets
           cp target/release/pahe-cli-linux-x86_64 release-assets/
-          cp target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe release-assets/
+          cp target/release/pahe-cli-linux-musl-x86_64 release-assets/
           cp target/aarch64-unknown-linux-gnu/release/pahe-cli-linux-aarch64 release-assets/
+          cp target/x86_64-pc-windows-gnu/release/pahe-cli-windows-x86_64.exe release-assets/
 
       - name: Upload Linux/Windows release assets
         uses: actions/upload-artifact@v4
@@ -118,6 +121,7 @@ jobs:
           ls -lah dist
           test -f dist/pahe-cli-linux-x86_64
           test -f dist/pahe-cli-linux-aarch64
+          test -f dist/pahe-cli-linux-musl-x86_64
           test -f dist/pahe-cli-windows-x86_64.exe
           test -f dist/pahe-cli-macos-x86_64
           test -f dist/pahe-cli-macos-aarch64
