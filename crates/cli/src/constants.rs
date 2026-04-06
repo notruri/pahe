@@ -4,7 +4,7 @@ use regex::Regex;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub const ANIMEPAHE_DOMAIN: &str = "animepahe.si";
+pub const ANIMEPAHE_DOMAIN: &str = "animepahe.pw";
 
 pub static UUID_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-f0-9-]{36}$").expect("uuid regex must compile"));
